@@ -60,4 +60,12 @@ lazbuild tests/Unit/fpc/PascalJsonMapperUnitTestsFpc.lpi
 tests/Unit/fpc/PascalJsonMapperUnitTestsFpc.exe --all --format=plain
 ```
 
-On Delphi, open `PascalJsonMapper.groupproj` and run `PascalJsonMapper.UnitTests`. Both suites must end with 0 leaks.
+On Linux, through Docker, the same suite builds with plain `fpc` from a read-only copy of the tree:
+
+```
+sh tools/test_fpc_docker.sh             # FPC_IMAGE=<image with FPC 3.2.2>, default fpc322-bookworm
+```
+
+On Delphi, open `PascalJsonMapper.groupproj` and run `PascalJsonMapper.UnitTests`. "Build All" only builds the active platform, so switch the target platform to build Win64. Every suite must end with 0 leaks.
+
+Last verified: FPC 3.2.2 Win64 and x86_64-linux (10 runs, including 5 pinned to one CPU), and Delphi 12 CE Win32 and Win64. Each passed 75/75 with 0 leaks.
