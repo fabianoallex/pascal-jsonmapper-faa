@@ -39,7 +39,7 @@ Json := TJsonMapper.Shared.ToJson<IProduct>(Product);   // {"name":"Rice","price
 - **Interfaces** are created through `RegisterMapping<I, C>`. The class's own constructor runs. **Class-typed properties** are never created: reading populates the instance the property already holds.
 - **Names**: written in camelCase (`Naming := jnAsDeclared` keeps the declared names) and read case-insensitively. Unknown JSON members are ignored. An absent member leaves the property untouched. `null` into a scalar keeps the current value.
 - **Types**: strings, chars, all integer sizes (range-checked), `Int64`, `Single`/`Double`/`Extended`/`Currency`, `Boolean`, enums (by name), `TDateTime`/`TDate`/`TTime` (ISO 8601, no zone written; an offset on input converts to UTC), interfaces, dynamic arrays, objects. Anything else raises `EJsonMapperError` with the JSON path (`$.items[1].code`). The fix for an unsupported type is a converter.
-- **Converters** (`IJsonConverter`) run before the built-in rules, and the last registered wins. A converter can omit a member by writing nothing, which is how a bridge for optional types encodes *absent / null / value*. The library that owns a type should ship its converter in a separate unit or package, so neither core depends on the other.
+- **Converters** (`IJsonConverter`) run before the built-in rules, and the last registered wins. A converter can omit a member by writing nothing, which is how a bridge for optional types encodes *absent / null / value*. The library that owns a type should ship its converter in a separate unit or package, so neither core depends on the other. See [docs/converters.md](docs/converters.md) for how to write one, with pascal-db-faa's optionals as the worked example.
 - **Threads**: register at startup, then use from any thread. Class metadata is cached under a lock.
 - **FPC strings** are treated as UTF-8 (the Lazarus convention). Delphi strings are UTF-16.
 
@@ -69,3 +69,7 @@ sh tools/test_fpc_docker.sh             # FPC_IMAGE=<image with FPC 3.2.2>, defa
 On Delphi, open `PascalJsonMapper.groupproj` and run `PascalJsonMapper.UnitTests`. "Build All" only builds the active platform, so switch the target platform to build Win64. Every suite must end with 0 leaks.
 
 Last verified: FPC 3.2.2 Win64 and x86_64-linux (10 runs, including 5 pinned to one CPU), and Delphi 12 CE Win32 and Win64. Each passed 75/75 with 0 leaks.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
