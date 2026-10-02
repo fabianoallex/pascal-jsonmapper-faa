@@ -307,21 +307,23 @@ begin
   TAssert.AssertEquals('-2', JsonFloatToStr(-2));
   TAssert.AssertEquals('0', JsonFloatToStr(0));
   // Parsed, not 0.1 + 0.2: the compiler folds that constant in higher
-  // precision (and x87 can double-round it at run time).
+  // precision (and x87 can double-round it at run time). Parsed with
+  // JsonStrToDouble, not StrToFloat: Delphi 12 Win64's StrToFloat reads
+  // 1.7976931348623157E308 one ulp low.
   TAssert.AssertEquals('0.30000000000000004',
-    JsonFloatToStr(StrToFloat('0.30000000000000004', JsonFormatSettings)));
+    JsonFloatToStr(JsonStrToDouble('0.30000000000000004')));
   TAssert.AssertEquals('0.3333333333333333', JsonFloatToStr(1 / 3));
   TAssert.AssertEquals('1E21', JsonFloatToStr(1E21));
   TAssert.AssertEquals('100000000000000000000', JsonFloatToStr(1E20));
   TAssert.AssertEquals('1.5E-7', JsonFloatToStr(1.5E-7));
-  TAssert.AssertEquals('0.000001', JsonFloatToStr(StrToFloat('0.000001', JsonFormatSettings)));
+  TAssert.AssertEquals('0.000001', JsonFloatToStr(JsonStrToDouble('0.000001')));
   TAssert.AssertEquals('100', JsonFloatToStr(100));
   TAssert.AssertEquals('-0.5', JsonFloatToStr(-0.5));
   TAssert.AssertEquals('123456789012345680',
-    JsonFloatToStr(StrToFloat('123456789012345678', JsonFormatSettings)));
-  TAssert.AssertEquals('5E-324', JsonFloatToStr(StrToFloat('5E-324', JsonFormatSettings)));
+    JsonFloatToStr(JsonStrToDouble('123456789012345678')));
+  TAssert.AssertEquals('5E-324', JsonFloatToStr(JsonStrToDouble('5E-324')));
   TAssert.AssertEquals('1.7976931348623157E308',
-    JsonFloatToStr(StrToFloat('1.7976931348623157E308', JsonFormatSettings)));
+    JsonFloatToStr(JsonStrToDouble('1.7976931348623157E308')));
 end;
 
 procedure TJsonWriterTests.Write_Single_ShortestRoundTrip;
