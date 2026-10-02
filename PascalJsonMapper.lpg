@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <ProjectGroup FileVersion="2">
+    <Targets>
+      <Target FileName="packages\pascaljsonmapper_pkg.lpk"/>
+      <Target FileName="PascalJsonMapper.lpi">
+        <BuildModes>
+          <Mode Name="Default"/>
+        </BuildModes>
+      </Target>
+      <Target FileName="tests\Unit\fpc\PascalJsonMapperUnitTestsFpc.lpi">
+        <BuildModes>
+          <Mode Name="Default"/>
+        </BuildModes>
+      </Target>
+      <!-- SCAFFOLD:TARGETS -->
+    </Targets>
+  </ProjectGroup>
+</CONFIG>

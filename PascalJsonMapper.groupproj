@@ -1,0 +1,43 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{2AC643C8-365E-41F3-B61D-9F21755A703B}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="PascalJsonMapper.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="tests\Unit\PascalJsonMapper.UnitTests.dproj">
+            <Dependencies/>
+        </Projects>
+        <!-- SCAFFOLD:PROJECTS -->
+    </ItemGroup>
+    <Target Name="PascalJsonMapper">
+        <MSBuild Projects="PascalJsonMapper.dproj"/>
+    </Target>
+    <Target Name="PascalJsonMapper:Clean">
+        <MSBuild Projects="PascalJsonMapper.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="PascalJsonMapper:Make">
+        <MSBuild Projects="PascalJsonMapper.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="PascalJsonMapperUnitTests">
+        <MSBuild Projects="tests\Unit\PascalJsonMapper.UnitTests.dproj"/>
+    </Target>
+    <Target Name="PascalJsonMapperUnitTests:Clean">
+        <MSBuild Projects="tests\Unit\PascalJsonMapper.UnitTests.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="PascalJsonMapperUnitTests:Make">
+        <MSBuild Projects="tests\Unit\PascalJsonMapper.UnitTests.dproj" Targets="Make"/>
+    </Target>
+    <!-- SCAFFOLD:TARGETS -->
+    <Target Name="Build">
+        <CallTarget Targets="PascalJsonMapper;PascalJsonMapperUnitTests"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="PascalJsonMapper:Clean;PascalJsonMapperUnitTests:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="PascalJsonMapper:Make;PascalJsonMapperUnitTests:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>
