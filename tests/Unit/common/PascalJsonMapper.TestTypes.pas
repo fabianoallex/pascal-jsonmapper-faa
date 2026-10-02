@@ -190,9 +190,9 @@ type
   public
     function CanConvert(ATypeInfo: PTypeInfo): Boolean;
     function ReadJson(AMapper: TJsonMapper; AJson: TJsonValue;
-      ATypeInfo: PTypeInfo; out AValue: TValue): Boolean;
+      ATypeInfo: PTypeInfo; const APath: string; out AValue: TValue): Boolean;
     function WriteJson(AMapper: TJsonMapper; const AValue: TValue;
-      ATypeInfo: PTypeInfo; AWriter: TJsonWriter): Boolean;
+      ATypeInfo: PTypeInfo; const APath: string; AWriter: TJsonWriter): Boolean;
   end;
 
 // Native string from code points (UTF-16 on Delphi, UTF-8 on FPC), so test
@@ -305,7 +305,7 @@ begin
 end;
 
 function TOptTextConverter.ReadJson(AMapper: TJsonMapper; AJson: TJsonValue;
-  ATypeInfo: PTypeInfo; out AValue: TValue): Boolean;
+  ATypeInfo: PTypeInfo; const APath: string; out AValue: TValue): Boolean;
 var
   Opt: IOptText;
 begin
@@ -318,7 +318,7 @@ begin
 end;
 
 function TOptTextConverter.WriteJson(AMapper: TJsonMapper; const AValue: TValue;
-  ATypeInfo: PTypeInfo; AWriter: TJsonWriter): Boolean;
+  ATypeInfo: PTypeInfo; const APath: string; AWriter: TJsonWriter): Boolean;
 var
   Opt: IOptText;
 begin

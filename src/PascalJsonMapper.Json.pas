@@ -729,9 +729,15 @@ end;
   decimal exponent is in -7 < X < 21, else d.dddE[-]X. }
 
 type
-  // Unsigned big integer, little-endian base 2^32, no high zero words.
-  // Every routine returns a fresh array, so values never alias.
-  TBig = array of Cardinal;
+  // Unsigned big integer, little-endian base 2^32, with a fixed capacity:
+  // conversions never touch the heap (allocating per operation made them
+  // ~20x slower under heaptrc, and slow without it too). Sizes needed:
+  // writing <= ~1150 bits; reading <= ~3820 bits (800 significant digits
+  // scaled by 10^1131, shifted by 55 for the quotient).
+  TBig = record
+    Len: Integer;
+    W: array[0..159] of Cardinal;
+  end;
 
   TFloatFormatInfo = record
     Precision: Integer;  // mantissa bits, hidden bit included
@@ -740,85 +746,97 @@ type
   end;
 
 const
+  BigWords = 160;
   DoubleFormat: TFloatFormatInfo = (Precision: 53; MinE: -1074; MaxE: 971);
   SingleFormat: TFloatFormatInfo = (Precision: 24; MinE: -149; MaxE: 104);
 
-function BigTrim(const A: TBig): TBig;
-var
-  N: Integer;
+procedure BigOverflow;
 begin
-  N := Length(A);
-  while (N > 0) and (A[N - 1] = 0) do
-    Dec(N);
-  Result := Copy(A, 0, N);
+  // Unreachable with the input bounds enforced by the callers.
+  raise EJsonError.Create('Internal error: number conversion exceeded its capacity');
 end;
 
-function BigFromU64(AValue: UInt64): TBig;
+procedure BigNormalize(var A: TBig);
 begin
-  Result := nil;
-  SetLength(Result, 2);
-  Result[0] := Cardinal(AValue and $FFFFFFFF);
-  Result[1] := Cardinal(AValue shr 32);
-  Result := BigTrim(Result);
+  while (A.Len > 0) and (A.W[A.Len - 1] = 0) do
+    Dec(A.Len);
+end;
+
+procedure BigSetU64(var A: TBig; AValue: UInt64);
+begin
+  A.W[0] := Cardinal(AValue and $FFFFFFFF);
+  A.W[1] := Cardinal(AValue shr 32);
+  A.Len := 2;
+  BigNormalize(A);
 end;
 
 function BigCmp(const A, B: TBig): Integer;
 var
   I: Integer;
 begin
-  if Length(A) <> Length(B) then
+  if A.Len <> B.Len then
   begin
-    if Length(A) > Length(B) then
+    if A.Len > B.Len then
       Exit(1);
     Exit(-1);
   end;
-  for I := High(A) downto 0 do
-    if A[I] <> B[I] then
+  for I := A.Len - 1 downto 0 do
+    if A.W[I] <> B.W[I] then
     begin
-      if A[I] > B[I] then
+      if A.W[I] > B.W[I] then
         Exit(1);
       Exit(-1);
     end;
   Result := 0;
 end;
 
-function BigAdd(const A, B: TBig): TBig;
+// A := A + B
+procedure BigAdd(var A: TBig; const B: TBig);
 var
   I, N: Integer;
   X, Y: Cardinal;
   Sum: UInt64;
 begin
-  N := Length(A);
-  if Length(B) > N then
-    N := Length(B);
-  Result := nil;
-  SetLength(Result, N + 1);
+  N := A.Len;
+  if B.Len > N then
+    N := B.Len;
   Sum := 0;
   for I := 0 to N - 1 do
   begin
-    if I < Length(A) then X := A[I] else X := 0;
-    if I < Length(B) then Y := B[I] else Y := 0;
+    if I < A.Len then X := A.W[I] else X := 0;
+    if I < B.Len then Y := B.W[I] else Y := 0;
     Sum := UInt64(X) + Y + (Sum shr 32);
-    Result[I] := Cardinal(Sum and $FFFFFFFF);
+    A.W[I] := Cardinal(Sum and $FFFFFFFF);
   end;
-  Result[N] := Cardinal(Sum shr 32);
-  Result := BigTrim(Result);
+  A.Len := N;
+  if (Sum shr 32) <> 0 then
+  begin
+    if N >= BigWords then
+      BigOverflow;
+    A.W[N] := Cardinal(Sum shr 32);
+    A.Len := N + 1;
+  end;
 end;
 
-// A - B, with A >= B.
-function BigSub(const A, B: TBig): TBig;
+// A := A - B, with A >= B
+procedure BigSub(var A: TBig; const B: TBig);
 var
   I: Integer;
   Y: Cardinal;
   Diff, Borrow: Int64;
 begin
-  Result := nil;
-  SetLength(Result, Length(A));
   Borrow := 0;
-  for I := 0 to High(A) do
+  for I := 0 to A.Len - 1 do
   begin
-    if I < Length(B) then Y := B[I] else Y := 0;
-    Diff := Int64(A[I]) - Int64(Y) - Borrow;
+    if I < B.Len then
+      Y := B.W[I]
+    else
+    begin
+      if Borrow = 0 then
+        Break;
+      Y := 0;
+    end;
+    Diff := Int64(A.W[I]) - Int64(Y) - Borrow;
     if Diff < 0 then
     begin
       Diff := Diff + $100000000;
@@ -826,90 +844,113 @@ begin
     end
     else
       Borrow := 0;
-    Result[I] := Cardinal(Diff);
+    A.W[I] := Cardinal(Diff);
   end;
-  Result := BigTrim(Result);
+  BigNormalize(A);
 end;
 
-function BigMulSmall(const A: TBig; AFactor: Cardinal): TBig;
+// A := A * AFactor
+procedure BigMulSmall(var A: TBig; AFactor: Cardinal);
 var
   I: Integer;
   Product: UInt64;
 begin
-  Result := nil;
-  SetLength(Result, Length(A) + 1);
   Product := 0;
-  for I := 0 to High(A) do
+  for I := 0 to A.Len - 1 do
   begin
-    Product := UInt64(A[I]) * AFactor + (Product shr 32);
-    Result[I] := Cardinal(Product and $FFFFFFFF);
+    Product := UInt64(A.W[I]) * AFactor + (Product shr 32);
+    A.W[I] := Cardinal(Product and $FFFFFFFF);
   end;
-  Result[Length(A)] := Cardinal(Product shr 32);
-  Result := BigTrim(Result);
+  if (Product shr 32) <> 0 then
+  begin
+    if A.Len >= BigWords then
+      BigOverflow;
+    A.W[A.Len] := Cardinal(Product shr 32);
+    Inc(A.Len);
+  end;
+  BigNormalize(A);
 end;
 
-function BigMul(const A, B: TBig): TBig;
+// R := A * B (R must be a different variable from A and B)
+procedure BigMul(var R: TBig; const A, B: TBig);
 var
   I, J: Integer;
   Product, Carry: UInt64;
 begin
-  if (Length(A) = 0) or (Length(B) = 0) then
-    Exit(nil);
-  Result := nil;
-  SetLength(Result, Length(A) + Length(B));
-  for I := 0 to High(Result) do
-    Result[I] := 0;
-  for I := 0 to High(A) do
+  if (A.Len = 0) or (B.Len = 0) then
+  begin
+    R.Len := 0;
+    Exit;
+  end;
+  if A.Len + B.Len > BigWords then
+    BigOverflow;
+  for I := 0 to A.Len + B.Len - 1 do
+    R.W[I] := 0;
+  for I := 0 to A.Len - 1 do
   begin
     Carry := 0;
-    for J := 0 to High(B) do
+    for J := 0 to B.Len - 1 do
     begin
       // (2^32-1)^2 + 2 * (2^32-1) = 2^64 - 1: never overflows.
-      Product := UInt64(A[I]) * B[J] + Result[I + J] + Carry;
-      Result[I + J] := Cardinal(Product and $FFFFFFFF);
+      Product := UInt64(A.W[I]) * B.W[J] + R.W[I + J] + Carry;
+      R.W[I + J] := Cardinal(Product and $FFFFFFFF);
       Carry := Product shr 32;
     end;
-    Result[I + Length(B)] := Cardinal(Carry);
+    R.W[I + B.Len] := Cardinal(Carry);
   end;
-  Result := BigTrim(Result);
+  R.Len := A.Len + B.Len;
+  BigNormalize(R);
 end;
 
-function BigShl(const A: TBig; ABits: Integer): TBig;
+// A := A shl ABits
+procedure BigShl(var A: TBig; ABits: Integer);
 var
   Words, Bits, I: Integer;
-  V: UInt64;
-  Carry: Cardinal;
+  Top: Cardinal;
 begin
-  if Length(A) = 0 then
-    Exit(nil);
+  if (A.Len = 0) or (ABits = 0) then
+    Exit;
   Words := ABits div 32;
   Bits := ABits mod 32;
-  Result := nil;
-  SetLength(Result, Length(A) + Words + 1);
-  for I := 0 to Words - 1 do
-    Result[I] := 0;
-  Carry := 0;
-  for I := 0 to High(A) do
+  if Bits = 0 then
   begin
-    V := (UInt64(A[I]) shl Bits) or Carry;
-    Result[I + Words] := Cardinal(V and $FFFFFFFF);
-    Carry := Cardinal(V shr 32);
+    if A.Len + Words > BigWords then
+      BigOverflow;
+    for I := A.Len - 1 downto 0 do
+      A.W[I + Words] := A.W[I];
+    Top := 0;
+  end
+  else
+  begin
+    Top := A.W[A.Len - 1] shr (32 - Bits);
+    if A.Len + Words + Ord(Top <> 0) > BigWords then
+      BigOverflow;
+    if Top <> 0 then
+      A.W[A.Len + Words] := Top;
+    // Shifts done in 64 bits and masked: a Cardinal shl is 32-bit on Delphi
+    // but widened on 64-bit FPC.
+    for I := A.Len - 1 downto 1 do
+      A.W[I + Words] := Cardinal((UInt64(A.W[I]) shl Bits) and $FFFFFFFF) or
+        (A.W[I - 1] shr (32 - Bits));
+    A.W[Words] := Cardinal((UInt64(A.W[0]) shl Bits) and $FFFFFFFF);
   end;
-  Result[Length(A) + Words] := Carry;
-  Result := BigTrim(Result);
+  for I := 0 to Words - 1 do
+    A.W[I] := 0;
+  A.Len := A.Len + Words + Ord(Top <> 0);
 end;
 
-function BigPow10(AExp: Integer): TBig;
+// A := 10^AExp
+procedure BigPow10(var A: TBig; AExp: Integer);
 begin
-  Result := BigFromU64(1);
+  BigSetU64(A, 1);
   while AExp >= 9 do
   begin
-    Result := BigMulSmall(Result, 1000000000);
+    BigMulSmall(A, 1000000000);
     Dec(AExp, 9);
   end;
   while AExp > 0 do
   begin
-    Result := BigMulSmall(Result, 10);
+    BigMulSmall(A, 10);
     Dec(AExp);
   end;
 end;
@@ -918,10 +959,10 @@ function BigBitLength(const A: TBig): Integer;
 var
   X: Cardinal;
 begin
-  if Length(A) = 0 then
+  if A.Len = 0 then
     Exit(0);
-  Result := (Length(A) - 1) * 32;
-  X := A[High(A)];
+  Result := (A.Len - 1) * 32;
+  X := A.W[A.Len - 1];
   while X <> 0 do
   begin
     Inc(Result);
@@ -929,13 +970,32 @@ begin
   end;
 end;
 
-function BigFromDigits(const ADigits: string): TBig;
+// A := the decimal digit string, nine digits at a time.
+procedure BigFromDigits(var A: TBig; const ADigits: string);
 var
-  I: Integer;
+  I, ChunkLen: Integer;
+  Chunk, Scale: Cardinal;
+  C: TBig;
 begin
-  Result := nil;
+  A.Len := 0;
+  Chunk := 0;
+  ChunkLen := 0;
+  Scale := 1;
   for I := 1 to Length(ADigits) do
-    Result := BigAdd(BigMulSmall(Result, 10), BigFromU64(Ord(ADigits[I]) - Ord('0')));
+  begin
+    Chunk := Chunk * 10 + Cardinal(Ord(ADigits[I]) - Ord('0'));
+    Scale := Scale * 10;
+    Inc(ChunkLen);
+    if (ChunkLen = 9) or (I = Length(ADigits)) then
+    begin
+      BigMulSmall(A, Scale);
+      BigSetU64(C, Chunk);
+      BigAdd(A, C);
+      Chunk := 0;
+      ChunkLen := 0;
+      Scale := 1;
+    end;
+  end;
 end;
 
 { Writing }
@@ -952,59 +1012,73 @@ var
 begin
   Even := (AF and 1) = 0;
   Hidden := UInt64(1) shl (AFormat.Precision - 1);
+  BigSetU64(R, AF);
   if AE >= 0 then
   begin
     if AF <> Hidden then
     begin
-      R := BigShl(BigFromU64(AF), AE + 1);
-      S := BigFromU64(2);
-      MPlus := BigShl(BigFromU64(1), AE);
+      BigShl(R, AE + 1);
+      BigSetU64(S, 2);
+      BigSetU64(MPlus, 1);
+      BigShl(MPlus, AE);
       MMinus := MPlus;
     end
     else
     begin
       // Power of two: the gap below is half the gap above.
-      R := BigShl(BigFromU64(AF), AE + 2);
-      S := BigFromU64(4);
-      MPlus := BigShl(BigFromU64(1), AE + 1);
-      MMinus := BigShl(BigFromU64(1), AE);
+      BigShl(R, AE + 2);
+      BigSetU64(S, 4);
+      BigSetU64(MPlus, 1);
+      BigShl(MPlus, AE + 1);
+      BigSetU64(MMinus, 1);
+      BigShl(MMinus, AE);
     end;
   end
   else if (AE = AFormat.MinE) or (AF <> Hidden) then
   begin
-    R := BigShl(BigFromU64(AF), 1);
-    S := BigShl(BigFromU64(1), 1 - AE);
-    MPlus := BigFromU64(1);
+    BigShl(R, 1);
+    BigSetU64(S, 1);
+    BigShl(S, 1 - AE);
+    BigSetU64(MPlus, 1);
     MMinus := MPlus;
   end
   else
   begin
-    R := BigShl(BigFromU64(AF), 2);
-    S := BigShl(BigFromU64(1), 2 - AE);
-    MPlus := BigFromU64(2);
-    MMinus := BigFromU64(1);
+    BigShl(R, 2);
+    BigSetU64(S, 1);
+    BigShl(S, 2 - AE);
+    BigSetU64(MPlus, 2);
+    BigSetU64(MMinus, 1);
   end;
 
   // Estimate K; the fixup below corrects an estimate one too low.
   Est := Ceil(Log10(AValue) - 1E-10);
   if Est >= 0 then
-    S := BigMul(S, BigPow10(Est))
+  begin
+    BigPow10(Scale, Est);
+    T := S;
+    BigMul(S, T, Scale);
+  end
   else
   begin
-    Scale := BigPow10(-Est);
-    R := BigMul(R, Scale);
-    MPlus := BigMul(MPlus, Scale);
-    MMinus := BigMul(MMinus, Scale);
+    BigPow10(Scale, -Est);
+    T := R;
+    BigMul(R, T, Scale);
+    T := MPlus;
+    BigMul(MPlus, T, Scale);
+    T := MMinus;
+    BigMul(MMinus, T, Scale);
   end;
-  T := BigAdd(R, MPlus);
+  T := R;
+  BigAdd(T, MPlus);
   if (BigCmp(T, S) > 0) or (Even and (BigCmp(T, S) = 0)) then
     AK := Est + 1
   else
   begin
     AK := Est;
-    R := BigMulSmall(R, 10);
-    MPlus := BigMulSmall(MPlus, 10);
-    MMinus := BigMulSmall(MMinus, 10);
+    BigMulSmall(R, 10);
+    BigMulSmall(MPlus, 10);
+    BigMulSmall(MMinus, 10);
   end;
 
   ADigits := '';
@@ -1013,24 +1087,27 @@ begin
     D := 0;
     while BigCmp(R, S) >= 0 do
     begin
-      R := BigSub(R, S);
+      BigSub(R, S);
       Inc(D);
     end;
     TooLow := (BigCmp(R, MMinus) < 0) or (Even and (BigCmp(R, MMinus) = 0));
-    T := BigAdd(R, MPlus);
+    T := R;
+    BigAdd(T, MPlus);
     TooHigh := (BigCmp(T, S) > 0) or (Even and (BigCmp(T, S) = 0));
     if not TooLow and not TooHigh then
     begin
       ADigits := ADigits + Char(Ord('0') + D);
-      R := BigMulSmall(R, 10);
-      MPlus := BigMulSmall(MPlus, 10);
-      MMinus := BigMulSmall(MMinus, 10);
+      BigMulSmall(R, 10);
+      BigMulSmall(MPlus, 10);
+      BigMulSmall(MMinus, 10);
       Continue;
     end;
     if TooLow and TooHigh then
     begin
       // Both neighbours' digits work: take the closer one.
-      if BigCmp(BigShl(R, 1), S) >= 0 then
+      T := R;
+      BigShl(T, 1);
+      if BigCmp(T, S) >= 0 then
         Inc(D);
     end
     else if TooHigh then
@@ -1222,7 +1299,7 @@ begin
   Result := True;
 end;
 
-// Quotient of N / D known to be below 2^(AMaxBits + 1); Rem gets N mod D.
+// Quotient of N / D known to be below 2^(AMaxBits + 1); ARem gets N mod D.
 function BigDivSmallQuotient(const N, D: TBig; AMaxBits: Integer; out ARem: TBig): UInt64;
 var
   B: Integer;
@@ -1232,10 +1309,11 @@ begin
   ARem := N;
   for B := AMaxBits downto 0 do
   begin
-    T := BigShl(D, B);
+    T := D;
+    BigShl(T, B);
     if BigCmp(ARem, T) >= 0 then
     begin
-      ARem := BigSub(ARem, T);
+      BigSub(ARem, T);
       Result := Result or (UInt64(1) shl B);
     end;
   end;
@@ -1246,7 +1324,7 @@ end;
 function DecimalToBinary(const ADigits: string; AExp10: Integer;
   const AFormat: TFloatFormatInfo; out AF: UInt64; out AE: Integer): Boolean;
 var
-  N, D, NS, DS, Rem: TBig;
+  N, D, NS, DS, Rem, P, T: TBig;
   Q, Limit: UInt64;
   Cmp: Integer;
 begin
@@ -1261,14 +1339,16 @@ begin
   if Length(ADigits) + AExp10 < -330 then
     Exit;
 
-  N := BigFromDigits(ADigits);
+  BigFromDigits(N, ADigits);
   if AExp10 >= 0 then
   begin
-    N := BigMul(N, BigPow10(AExp10));
-    D := BigFromU64(1);
+    BigPow10(P, AExp10);
+    T := N;
+    BigMul(N, T, P);
+    BigSetU64(D, 1);
   end
   else
-    D := BigPow10(-AExp10);
+    BigPow10(D, -AExp10);
 
   Limit := UInt64(1) shl AFormat.Precision;
   AE := BigBitLength(N) - BigBitLength(D) - AFormat.Precision;
@@ -1276,23 +1356,20 @@ begin
   begin
     if AE < AFormat.MinE then
       AE := AFormat.MinE;
+    NS := N;
+    DS := D;
     if AE >= 0 then
-    begin
-      NS := N;
-      DS := BigShl(D, AE);
-    end
+      BigShl(DS, AE)
     else
-    begin
-      NS := BigShl(N, -AE);
-      DS := D;
-    end;
+      BigShl(NS, -AE);
     Q := BigDivSmallQuotient(NS, DS, AFormat.Precision + 1, Rem);
     if Q < Limit then
       Break;
     Inc(AE);
   end;
 
-  Cmp := BigCmp(BigShl(Rem, 1), DS);
+  BigShl(Rem, 1);
+  Cmp := BigCmp(Rem, DS);
   if (Cmp > 0) or ((Cmp = 0) and ((Q and 1) = 1)) then
   begin
     Inc(Q);

@@ -117,9 +117,12 @@
         <DCCReference Include="..\..\src\PascalJsonMapper.Mapper.pas"/>
         <DCCReference Include="PascalJsonMapper.DUnitXCompat.pas"/>
         <DCCReference Include="common\PascalJsonMapper.TestTypes.pas"/>
+        <DCCReference Include="common\PascalJsonMapper.TestOptionals.pas"/>
+        <DCCReference Include="common\PascalJsonMapper.TestOptionalsBridge.pas"/>
         <DCCReference Include="PascalJsonMapper.JsonTests.pas"/>
         <DCCReference Include="PascalJsonMapper.MapperTests.pas"/>
         <DCCReference Include="PascalJsonMapper.ConcurrencyTests.pas"/>
+        <DCCReference Include="PascalJsonMapper.BridgeTests.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

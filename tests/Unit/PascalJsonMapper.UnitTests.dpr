@@ -19,9 +19,12 @@ uses
   PascalJsonMapper.Mapper in '..\..\src\PascalJsonMapper.Mapper.pas',
   PascalJsonMapper.DUnitXCompat in 'PascalJsonMapper.DUnitXCompat.pas',
   PascalJsonMapper.TestTypes in 'common\PascalJsonMapper.TestTypes.pas',
+  PascalJsonMapper.TestOptionals in 'common\PascalJsonMapper.TestOptionals.pas',
+  PascalJsonMapper.TestOptionalsBridge in 'common\PascalJsonMapper.TestOptionalsBridge.pas',
   PascalJsonMapper.JsonTests in 'PascalJsonMapper.JsonTests.pas',
   PascalJsonMapper.MapperTests in 'PascalJsonMapper.MapperTests.pas',
-  PascalJsonMapper.ConcurrencyTests in 'PascalJsonMapper.ConcurrencyTests.pas';
+  PascalJsonMapper.ConcurrencyTests in 'PascalJsonMapper.ConcurrencyTests.pas',
+  PascalJsonMapper.BridgeTests in 'PascalJsonMapper.BridgeTests.pas';
 
 var
   runner: ITestRunner;

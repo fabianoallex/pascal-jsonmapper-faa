@@ -26,6 +26,7 @@ uses
   fpcunit, testregistry,
   SysUtils,
   DateUtils,
+  Math,
   PascalJsonMapper.Json,
   PascalJsonMapper.Mapper,
   PascalJsonMapper.TestTypes;
@@ -53,6 +54,8 @@ type
     procedure Error_UnknownEnumName;
     procedure Error_UnregisteredInterface;
     procedure Error_InvalidJson;
+    procedure Error_InsideConverter_HasPath;
+    procedure Error_NumberOutOfRange_HasPath;
     procedure ClassProperty_PopulatedInPlace;
     procedure ClassProperty_Nil_Raises;
   end;
@@ -70,6 +73,7 @@ type
     procedure NilInterface_IsNull_NilArray_IsEmpty;
     procedure PlainObject_WithClassProperties;
     procedure RoundTrip_PreservesEverything;
+    procedure Error_NaN_HasPath;
   end;
 
   TMapperConverterTests = class(TTestCase)
@@ -103,9 +107,9 @@ type
   public
     function CanConvert(ATypeInfo: PTypeInfo): Boolean;
     function ReadJson(AMapper: TJsonMapper; AJson: TJsonValue;
-      ATypeInfo: PTypeInfo; out AValue: TValue): Boolean;
+      ATypeInfo: PTypeInfo; const APath: string; out AValue: TValue): Boolean;
     function WriteJson(AMapper: TJsonMapper; const AValue: TValue;
-      ATypeInfo: PTypeInfo; AWriter: TJsonWriter): Boolean;
+      ATypeInfo: PTypeInfo; const APath: string; AWriter: TJsonWriter): Boolean;
   end;
 
 function TConstantConverter.CanConvert(ATypeInfo: PTypeInfo): Boolean;
@@ -114,7 +118,7 @@ begin
 end;
 
 function TConstantConverter.ReadJson(AMapper: TJsonMapper; AJson: TJsonValue;
-  ATypeInfo: PTypeInfo; out AValue: TValue): Boolean;
+  ATypeInfo: PTypeInfo; const APath: string; out AValue: TValue): Boolean;
 var
   Opt: IOptText;
 begin
@@ -124,7 +128,7 @@ begin
 end;
 
 function TConstantConverter.WriteJson(AMapper: TJsonMapper; const AValue: TValue;
-  ATypeInfo: PTypeInfo; AWriter: TJsonWriter): Boolean;
+  ATypeInfo: PTypeInfo; const APath: string; AWriter: TJsonWriter): Boolean;
 begin
   AWriter.WriteString('constant');
   Result := True;
@@ -356,6 +360,34 @@ begin
   end;
 end;
 
+procedure TMapperReadTests.Error_InsideConverter_HasPath;
+var
+  Dto: IPatchDto;
+begin
+  // TOptTextConverter calls AJson.AsString on a number: an EJsonError with
+  // no path of its own, which the mapper must locate.
+  try
+    Dto := FMapper.FromJson<IPatchDto>('{"apelido":5}');
+    TAssert.Fail('A number for IOptText must raise');
+  except
+    on E: EJsonMapperError do
+      TAssert.AssertTrue(E.Message, Pos('$.apelido:', E.Message) = 1);
+  end;
+end;
+
+procedure TMapperReadTests.Error_NumberOutOfRange_HasPath;
+var
+  Dto: IScalarDto;
+begin
+  try
+    Dto := FMapper.FromJson<IScalarDto>('{"preco":1e309}');
+    TAssert.Fail('1e309 into a Double must raise');
+  except
+    on E: EJsonMapperError do
+      TAssert.AssertTrue(E.Message, Pos('$.preco:', E.Message) = 1);
+  end;
+end;
+
 procedure TMapperReadTests.ClassProperty_PopulatedInPlace;
 var
   P: TPerson;
@@ -501,6 +533,23 @@ var
 begin
   Dto := FMapper.FromJson<IOrderDto>(Json);
   TAssert.AssertEquals(Json, FMapper.ToJson<IOrderDto>(Dto));
+end;
+
+procedure TMapperWriteTests.Error_NaN_HasPath;
+var
+  S: TScalarDto;
+  Dto: IScalarDto;
+begin
+  S := TScalarDto.Create;
+  Dto := S;
+  S.Preco := NaN;
+  try
+    FMapper.ToJson<IScalarDto>(Dto);
+    TAssert.Fail('NaN must raise');
+  except
+    on E: EJsonMapperError do
+      TAssert.AssertTrue(E.Message, Pos('$.preco:', E.Message) = 1);
+  end;
 end;
 
 { TMapperConverterTests }

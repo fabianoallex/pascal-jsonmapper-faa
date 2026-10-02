@@ -48,13 +48,17 @@ type
     // property is left untouched). It can be a JSON null. Return False to
     // leave the destination untouched; True to assign AValue, which must be
     // of type ATypeInfo.
+    // APath is where the value sits ('$.items[2].price'): pass it on when
+    // recursing through AMapper.ReadValue/WriteValue. Raise EJsonError (or
+    // let TJsonValue's accessors raise it) for bad input: the mapper turns it
+    // into an EJsonMapperError carrying APath.
     function ReadJson(AMapper: TJsonMapper; AJson: TJsonValue;
-      ATypeInfo: PTypeInfo; out AValue: TValue): Boolean;
+      ATypeInfo: PTypeInfo; const APath: string; out AValue: TValue): Boolean;
     // Write exactly one value, or nothing and return False to omit it: a
     // property is then left out of the object; an array element becomes
     // null.
     function WriteJson(AMapper: TJsonMapper; const AValue: TValue;
-      ATypeInfo: PTypeInfo; AWriter: TJsonWriter): Boolean;
+      ATypeInfo: PTypeInfo; const APath: string; AWriter: TJsonWriter): Boolean;
   end;
 
   { Creates an instance through the class's own constructor. RegisterMapping
@@ -87,6 +91,10 @@ type
     function JsonName(const APropName: string): string;
     function CreateFromJson(ATypeInfo: PTypeInfo; AJson: TJsonValue;
       const APath: string): IInterface;
+    function DoReadValue(AJson: TJsonValue; ATypeInfo: PTypeInfo;
+      const APath: string; out AValue: TValue): Boolean;
+    function DoWriteValue(AWriter: TJsonWriter; const AValue: TValue;
+      ATypeInfo: PTypeInfo; const APath: string): Boolean;
     procedure DoRegisterMapping(AInterface: PTypeInfo; AClass: TClass;
       AFactory: TJsonInstanceFactoryClass);
   public
@@ -445,12 +453,15 @@ var
   Mapping: TJsonMapping;
   Obj: TObject;
 begin
-  if AJson.Kind <> jkObject then
-    Mismatch(APath, 'object', AJson);
+  // Registration first: for an interface nobody registered, "expected
+  // object" would point at the JSON instead of the missing mapping.
   Guid := GetTypeData(ATypeInfo)^.Guid;
   if not FMappings.TryGetValue(Guid, Mapping) then
-    raise EJsonMapperError.CreateFmt('%s: no class registered for interface %s',
-      [APath, JsonTypeName(ATypeInfo)]);
+    raise EJsonMapperError.CreateFmt(
+      '%s: no class registered for interface %s (RegisterMapping), and no ' +
+      'IJsonConverter accepts it', [APath, JsonTypeName(ATypeInfo)]);
+  if AJson.Kind <> jkObject then
+    Mismatch(APath, 'object', AJson);
   Obj := Mapping.Factory.CreateInstance;
   try
     ReadObject(Obj, AJson, APath);
@@ -507,6 +518,19 @@ end;
 
 function TJsonMapper.ReadValue(AJson: TJsonValue; ATypeInfo: PTypeInfo;
   const APath: string; out AValue: TValue): Boolean;
+begin
+  try
+    Result := DoReadValue(AJson, ATypeInfo, APath, AValue);
+  except
+    // From a converter or a TJsonValue accessor: add where it happened.
+    // EJsonMapperError is not an EJsonError, so outer levels pass it on.
+    on E: EJsonError do
+      raise EJsonMapperError.CreateFmt('%s: %s', [APath, E.Message]);
+  end;
+end;
+
+function TJsonMapper.DoReadValue(AJson: TJsonValue; ATypeInfo: PTypeInfo;
+  const APath: string; out AValue: TValue): Boolean;
 var
   Converter: IJsonConverter;
   Ord, Min, Max: Int64;
@@ -535,7 +559,7 @@ begin
   AValue := TValue.Empty;
   Converter := FindConverter(ATypeInfo);
   if Converter <> nil then
-    Exit(Converter.ReadJson(Self, AJson, ATypeInfo, AValue));
+    Exit(Converter.ReadJson(Self, AJson, ATypeInfo, APath, AValue));
 
   if AJson.IsNull then
   begin
@@ -772,6 +796,17 @@ end;
 
 function TJsonMapper.WriteValue(AWriter: TJsonWriter; const AValue: TValue;
   ATypeInfo: PTypeInfo; const APath: string): Boolean;
+begin
+  try
+    Result := DoWriteValue(AWriter, AValue, ATypeInfo, APath);
+  except
+    on E: EJsonError do
+      raise EJsonMapperError.CreateFmt('%s: %s', [APath, E.Message]);
+  end;
+end;
+
+function TJsonMapper.DoWriteValue(AWriter: TJsonWriter; const AValue: TValue;
+  ATypeInfo: PTypeInfo; const APath: string): Boolean;
 var
   Converter: IJsonConverter;
   Data: Pointer;
@@ -783,7 +818,7 @@ var
 begin
   Converter := FindConverter(ATypeInfo);
   if Converter <> nil then
-    Exit(Converter.WriteJson(Self, AValue, ATypeInfo, AWriter));
+    Exit(Converter.WriteJson(Self, AValue, ATypeInfo, APath, AWriter));
 
   Result := True;
   case ATypeInfo^.Kind of

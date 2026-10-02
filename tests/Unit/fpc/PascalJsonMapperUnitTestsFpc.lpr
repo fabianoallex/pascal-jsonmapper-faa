@@ -23,7 +23,8 @@ uses
   Classes, consoletestrunner, testregistry,
   PascalJsonMapper.JsonTests,
   PascalJsonMapper.MapperTests,
-  PascalJsonMapper.ConcurrencyTests;
+  PascalJsonMapper.ConcurrencyTests,
+  PascalJsonMapper.BridgeTests;
 
 var
   ConsoleApp: TTestRunner;
