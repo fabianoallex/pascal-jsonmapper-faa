@@ -78,6 +78,8 @@ type
     [Test]
     procedure Write_EachFlavorAndState;
     [Test]
+    procedure Write_NullInOptionalOnly_IsNull;
+    [Test]
     procedure Array_ReadElements;
     [Test]
     procedure Array_OmittedElementIsNull;
@@ -207,6 +209,21 @@ begin
   D.Nivel := TOptNullInteger.Null;
   TAssert.AssertEquals(
     '{"apelido":"Zeca","telefone":"5551","idade":30,"pontos":-5,"nivel":null,"notas":[]}',
+    TJsonMapper.Shared.ToJson<IBridgeDto>(Dto));
+end;
+
+procedure TBridgeTests.Write_NullInOptionalOnly_IsNull;
+var
+  D: TBridgeDto;
+  Dto: IBridgeDto;
+begin
+  // TOptNullString.Null compiles into an IOptString; its Value ('') is
+  // made up, so it goes out as null rather than as an empty string.
+  D := TBridgeDto.Create;
+  Dto := D;
+  D.Apelido := TOptNullString.Null;
+  D.Idade := TOptNullInteger.Null;
+  TAssert.AssertEquals('{"apelido":null,"telefone":null,"idade":null,"pontos":null,"notas":[]}',
     TJsonMapper.Shared.ToJson<IBridgeDto>(Dto));
 end;
 

@@ -8,9 +8,15 @@
   string/Integer). The JSON rules per flavor:
 
                reading                     writing
-    IOptXxx     null -> error               nil/undefined -> member omitted
+    IOptXxx     null -> error               nil/undefined -> member omitted;
+                                            null -> null [1]
     INullXxx    null -> Null                nil/null      -> null
     IOptNullXxx null -> Null                nil/undefined -> omitted; null -> null
+
+  [1] IOptXxx has no Null state, but TOptNullXxx.Null assigned to one
+  compiles (one class implements the three flavors); its Value would be a
+  made-up '' or 0, so it is written as null. Same rule as pascal-db-faa's
+  PascalDb.JsonMapper.Optionals, which this unit models.
 
   A value is read and written by delegating to the mapper (ReadValue /
   WriteValue with the same path), so number/string rules and error paths are
@@ -198,7 +204,12 @@ begin
   case Flavor of
     ofOpt:
       if Absent then
-        Exit(False);
+        Exit(False)
+      else if IsNull and (Intf <> nil) then
+      begin
+        AWriter.WriteNull;
+        Exit(True);
+      end;
     ofNull:
       if IsNull then
       begin

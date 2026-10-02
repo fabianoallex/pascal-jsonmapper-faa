@@ -52,23 +52,26 @@ Register at startup only. Reads and writes are thread-safe, registration isn't.
 - **A generic interface's GUID is shared by every specialization.** `IOptional<string>` and `IOptional<Integer>` carry the same GUID, so `Supports(X, IOptional<string>)` can't tell them apart and may hand back the wrong vtable. Query the concrete interface instead (`IOptString`, `IOptInteger`...), or the property's own `ATypeInfo` GUID.
 - **One class implements three interfaces.** `TOptNullXxx` implements `IOptXxx`, `INullXxx` and `IOptNullXxx`. After creating one, return the interface the property declares: `Obj.GetInterface(GetTypeData(ATypeInfo)^.Guid, Intf)`.
 - **Read state through the base interfaces.** Use `IOptionalBase.HasValue` and `INullableBase.IsNull` with `Supports`, so a foreign implementation of one flavor still works.
-- **`TGUID` is a record, and the mapper has no built-in rule for it.** For `IOptGuid`/`INullGuid`/`IOptNullGuid`, read and write the string yourself (`GUIDToString`/`StringToGUID`). Decide whether the braces stay. The original `Common.JsonMapper` wrote `GUIDToString`, which includes them.
+- **`TGUID` is a record, and the mapper has no built-in rule for it.** For `IOptGuid`/`INullGuid`/`IOptNullGuid`, read and write the string yourself. pascal-db-faa writes `GUIDToString` (with braces, as the original `Common.JsonMapper` did) and reads with or without braces.
+- **An `IOptXxx` can hold a Null.** `TOptNullXxx.Null` assigned to an `IOptXxx` compiles, because one class implements the three flavors. Its `Value` is a made-up `''` or `0`, so write `null` rather than that value.
 
 ## pascal-db-faa specifics
 
+The real bridge is [`PascalDb.JsonMapper.Optionals`](https://github.com/fabianoallex/pascal-db-faa/blob/main/bridges/jsonmapper/PascalDb.JsonMapper.Optionals.pas), in the `pascal_db_faa_jsonmapper` package, with pascal-jsonmapper-faa as a git submodule at `external/pascal-jsonmapper-faa`.
+
 There are 9 value types × 3 flavors = 27 interfaces: `String`, `Integer`, `Int64`, `Double`, `Single`, `Currency`, `DateTime`, `Boolean`, `Guid`, each as `IOptXxx`/`INullXxx`/`IOptNullXxx`. Everything but `Guid` can delegate its value to the mapper (`TypeInfo(TDateTime)` gives ISO 8601).
 
-The rules the test bridge implements:
+The rules, the same in the real bridge and in this repository's test bridge:
 
 | | reading `null` | writing `nil` / Undefined | writing Null |
 |---|---|---|---|
-| `IOptXxx` | **error** | member omitted | (no such state) |
+| `IOptXxx` | **error** | member omitted | `null` |
 | `INullXxx` | `Null` | **`null`** | `null` |
 | `IOptNullXxx` | `Null` | member omitted | `null` |
 
-**Two decisions to make before writing the real bridge**, because `delphi-api-infra-faa`'s original `Common.JsonMapper` behaved differently:
+Two of these differ, on purpose, from `delphi-api-infra-faa`'s original `Common.JsonMapper`:
 
-1. **`null` into an `IOptXxx`.** The original accepted it and stored `TOptNullXxx.Null`. The test bridge rejects it, since an `IOptXxx` has no null state. Accepting it is lenient, but a DTO typed `IOptString` (for example "name may be absent but not null") then gets a value it can't express.
-2. **A `nil` `INullXxx` when writing.** The original omitted every `nil` interface. The test bridge writes `null`, matching `TOptionals.Safe`, which reads `nil` as Null for that flavor. Omitting is the original's behavior; writing `null` is the one consistent with the type.
+1. **`null` into an `IOptXxx` is rejected.** The original stored `TOptNullXxx.Null`, a state the type can't express. "May be absent, never null" is exactly what `IOptXxx` says.
+2. **A `nil` `INullXxx` is written as `null`.** The original omitted every `nil` interface. `TOptionals.Safe` reads `nil` as Null for that flavor, so `null` is the consistent output, and the member is never missing.
 
-Pin both down with tests in pascal-db-faa, mirrored for DUnitX and FPCUnit like the rest of its suite.
+`DecimalPlaces` of `Single`/`Double` is not part of the JSON: written values are the shortest exact text, and read values get the default (`-1`).
