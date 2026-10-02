@@ -625,23 +625,25 @@ begin
         case GetTypeData(ATypeInfo)^.FloatType of
           ftSingle:
             begin
-              Sgl := StrToFloat(AJson.NumberText, JsonFormatSettings);
+              Sgl := JsonStrToSingle(AJson.NumberText);
               TValue.Make(@Sgl, ATypeInfo, AValue);
             end;
           ftDouble:
             begin
-              Dbl := StrToFloat(AJson.NumberText, JsonFormatSettings);
+              Dbl := JsonStrToDouble(AJson.NumberText);
               TValue.Make(@Dbl, ATypeInfo, AValue);
             end;
           ftExtended:
             begin
-              Ext := StrToFloat(AJson.NumberText, JsonFormatSettings);
+              // Read as Double: identical on every target (Extended is Double on
+              // Win64/ARM anyway).
+              Ext := JsonStrToDouble(AJson.NumberText);
               TValue.Make(@Ext, ATypeInfo, AValue);
             end;
           ftCurr:
             begin
               if not TryStrToCurr(AJson.NumberText, Cur, JsonFormatSettings) then
-                Cur := StrToFloat(AJson.NumberText, JsonFormatSettings);
+                Cur := JsonStrToDouble(AJson.NumberText);
               TValue.Make(@Cur, ATypeInfo, AValue);
             end;
         else

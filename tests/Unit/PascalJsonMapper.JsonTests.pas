@@ -70,6 +70,25 @@ type
   end;
 
   [TestFixture]
+  TJsonNumberTests = class
+  public
+    [Test]
+    procedure Read_Double_ExactBits;
+    [Test]
+    procedure Read_Single_ExactBits;
+    [Test]
+    procedure Read_Invalid_Raises;
+    [Test]
+    procedure Write_Double_HardCases;
+    [Test]
+    procedure Write_Single_Subnormal;
+    [Test]
+    procedure RoundTrip_Double_RandomBits;
+    [Test]
+    procedure RoundTrip_Single_RandomBits;
+  end;
+
+  [TestFixture]
   TJsonDateTests = class
   public
     [Test]
@@ -370,6 +389,161 @@ begin
   end;
 end;
 
+{ TJsonNumberTests }
+
+// Expected bits come from CPython's float/struct (correctly rounded).
+
+function DoubleBits(AValue: Double): Int64;
+begin
+  Move(AValue, Result, SizeOf(Result));
+end;
+
+function DoubleFromBits(ABits: Int64): Double;
+begin
+  Move(ABits, Result, SizeOf(Result));
+end;
+
+function SingleBits(AValue: Single): Int64;
+var
+  C: Cardinal;
+begin
+  Move(AValue, C, SizeOf(C));
+  Result := C;
+end;
+
+function SingleFromBits(ABits: Cardinal): Single;
+begin
+  Move(ABits, Result, SizeOf(Result));
+end;
+
+// xorshift64: shifts and xors only, so no overflow-check trap under $Q+.
+function NextRandom(var AState: UInt64): UInt64;
+begin
+  AState := AState xor (AState shl 13);
+  AState := AState xor (AState shr 7);
+  AState := AState xor (AState shl 17);
+  Result := AState;
+end;
+
+procedure AssertDoubleBits(const AText: string; AExpected: Int64);
+begin
+  TAssert.AssertEquals(AText, AExpected, DoubleBits(JsonStrToDouble(AText)));
+end;
+
+procedure TJsonNumberTests.Read_Double_ExactBits;
+begin
+  AssertDoubleBits('0.1', $3FB999999999999A);
+  AssertDoubleBits('0.30000000000000004', $3FD3333333333334);
+  AssertDoubleBits('1e23', $44B52D02C7E14AF6);
+  AssertDoubleBits('0.000001', $3EB0C6F7A0B5ED8D);
+  AssertDoubleBits('123456789012345678901234567890', $45F8EE90FF6C373E);
+  // Ties to even
+  AssertDoubleBits('9007199254740993', $4340000000000000);
+  AssertDoubleBits('9007199254740995', $4340000000000002);
+  // Subnormals and the halfway point below the smallest one
+  AssertDoubleBits('5e-324', $0000000000000001);
+  AssertDoubleBits('2.4703282292062327e-324', $0000000000000000);
+  AssertDoubleBits('2.4703282292062328e-324', $0000000000000001);
+  AssertDoubleBits('2.2250738585072011e-308', $000FFFFFFFFFFFFF);
+  AssertDoubleBits('2.2250738585072014e-308', $0010000000000000);
+  AssertDoubleBits('1e-400', $0000000000000000);
+  // Largest finite, power of two, negative zero
+  AssertDoubleBits('1.7976931348623157e308', $7FEFFFFFFFFFFFFF);
+  AssertDoubleBits('8.98846567431158e307', $7FE0000000000000);
+  AssertDoubleBits('-0', Int64($8000000000000000));
+  AssertDoubleBits('-0.1', Int64($BFB999999999999A));
+end;
+
+procedure TJsonNumberTests.Read_Single_ExactBits;
+begin
+  TAssert.AssertEquals(Int64($3DCCCCCD), SingleBits(JsonStrToSingle('0.1')));
+  TAssert.AssertEquals(Int64($7F7FFFFF), SingleBits(JsonStrToSingle('3.4028235e38')));
+  TAssert.AssertEquals(Int64($00000001), SingleBits(JsonStrToSingle('1.4e-45')));
+  TAssert.AssertEquals(Int64($4B800000), SingleBits(JsonStrToSingle('16777217')));
+  TAssert.AssertEquals(Int64($40490FD0), SingleBits(JsonStrToSingle('3.14159')));
+end;
+
+procedure TJsonNumberTests.Read_Invalid_Raises;
+const
+  Bad: array[0..6] of string = ('', '-', '1.', '.5', '1e', '0x10', '1e309');
+var
+  I: Integer;
+begin
+  for I := 0 to High(Bad) do
+    try
+      JsonStrToDouble(Bad[I]);
+      TAssert.Fail('Must raise: "' + Bad[I] + '"');
+    except
+      on E: EJsonError do
+        ;
+    end;
+  try
+    JsonStrToSingle('3.5e38');
+    TAssert.Fail('Single overflow must raise');
+  except
+    on E: EJsonError do
+      ;
+  end;
+end;
+
+procedure TJsonNumberTests.Write_Double_HardCases;
+begin
+  TAssert.AssertEquals('5E-324', JsonFloatToStr(DoubleFromBits($0000000000000001)));
+  TAssert.AssertEquals('2.225073858507201E-308', JsonFloatToStr(DoubleFromBits($000FFFFFFFFFFFFF)));
+  TAssert.AssertEquals('2.2250738585072014E-308', JsonFloatToStr(DoubleFromBits($0010000000000000)));
+  TAssert.AssertEquals('8.98846567431158E307', JsonFloatToStr(DoubleFromBits($7FE0000000000000)));
+  TAssert.AssertEquals('1E23', JsonFloatToStr(DoubleFromBits($44B52D02C7E14AF6)));
+  TAssert.AssertEquals('9007199254740992', JsonFloatToStr(DoubleFromBits($4340000000000000)));
+  TAssert.AssertEquals('1.2345678901234568E29', JsonFloatToStr(DoubleFromBits($45F8EE90FF6C373E)));
+  TAssert.AssertEquals('-0.1', JsonFloatToStr(DoubleFromBits(Int64($BFB999999999999A))));
+end;
+
+procedure TJsonNumberTests.Write_Single_Subnormal;
+begin
+  TAssert.AssertEquals('1E-45', JsonSingleToStr(SingleFromBits($00000001)));
+  TAssert.AssertEquals('3.4028235E38', JsonSingleToStr(SingleFromBits($7F7FFFFF)));
+end;
+
+procedure TJsonNumberTests.RoundTrip_Double_RandomBits;
+var
+  State, Bits: UInt64;
+  I, Checked: Integer;
+  Text: string;
+begin
+  State := 88172645463325252;
+  Checked := 0;
+  for I := 1 to 20000 do
+  begin
+    Bits := NextRandom(State);
+    if (Bits shr 52) and $7FF = $7FF then
+      Continue;  // NaN/infinity
+    Text := JsonFloatToStr(DoubleFromBits(Int64(Bits)));
+    if DoubleBits(JsonStrToDouble(Text)) <> Int64(Bits) then
+      TAssert.Fail('Round trip of ' + IntToHex(Int64(Bits), 16) + ' via ' + Text);
+    Inc(Checked);
+  end;
+  TAssert.AssertTrue(Checked > 19000);
+end;
+
+procedure TJsonNumberTests.RoundTrip_Single_RandomBits;
+var
+  State: UInt64;
+  Bits: Cardinal;
+  I: Integer;
+  Text: string;
+begin
+  State := 2463534242;
+  for I := 1 to 20000 do
+  begin
+    Bits := Cardinal(NextRandom(State) and $FFFFFFFF);
+    if (Bits shr 23) and $FF = $FF then
+      Continue;
+    Text := JsonSingleToStr(SingleFromBits(Bits));
+    if SingleBits(JsonStrToSingle(Text)) <> Int64(Bits) then
+      TAssert.Fail('Round trip of ' + IntToHex(Int64(Bits), 8) + ' via ' + Text);
+  end;
+end;
+
 { TJsonDateTests }
 
 procedure TJsonDateTests.DateTime_Format;
@@ -423,6 +597,7 @@ end;
 initialization
   TDUnitX.RegisterTestFixture(TJsonParserTests);
   TDUnitX.RegisterTestFixture(TJsonWriterTests);
+  TDUnitX.RegisterTestFixture(TJsonNumberTests);
   TDUnitX.RegisterTestFixture(TJsonDateTests);
 
 end.

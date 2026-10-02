@@ -129,10 +129,15 @@ type
 // trailing content. The caller owns the result.
 function ParseJson(const AText: string): TJsonValue;
 
-// Shortest decimal text that reads back as exactly the same Double/Single.
-// Raises EJsonError for NaN and infinities (JSON has no representation).
+// Shortest decimal text that reads back as exactly the same Double/Single,
+// and its inverse, correctly rounded. Computed with exact integer arithmetic,
+// not the RTL, so every compiler/target gives the same text and the same
+// bits. JsonFloatToStr raises EJsonError for NaN and infinities (JSON has no
+// representation); the readers raise it for malformed or out-of-range text.
 function JsonFloatToStr(AValue: Double): string;
 function JsonSingleToStr(AValue: Single): string;
+function JsonStrToDouble(const AText: string): Double;
+function JsonStrToSingle(const AText: string): Single;
 function JsonCurrencyToStr(AValue: Currency): string;
 
 // ISO 8601. Output has no zone designator: TDateTime carries no zone, so the
@@ -305,7 +310,7 @@ end;
 function TJsonValue.AsDouble: Double;
 begin
   RequireKind(jkNumber);
-  Result := StrToFloat(FText, GFormatSettings);
+  Result := JsonStrToDouble(FText);
 end;
 
 function TJsonValue.GetItem(AIndex: Integer): TJsonValue;
@@ -706,67 +711,333 @@ begin
   end;
 end;
 
-{ Number formatting
+{ Number conversion
 
-  Shortest text that reads back as the same value, built from a 17-digit
-  decimal expansion: round that digit string to 1, 2, ... digits and keep
-  the first that parses back exactly. Not FloatToStrF(ffGeneral, 17): on FPC
-  3.2.2 Win64 (Extended = Double) it stops at ~15 significant digits, so
-  0.30000000000000004 came out as "0.3". FPC's Str(Double) does give 17.
+  Binary <-> decimal conversion of Double/Single is done here with exact
+  big-integer arithmetic, not with the RTL: FloatToStrF stops at 15 digits
+  on FPC targets without an 80-bit Extended (Win64, ARM), and on Delphi 12
+  Win64 the RTL round trip printed 0.30000000000000004 as
+  0.30000000000000006. Doing it here makes the text identical on every
+  compiler and target, by construction.
+
+  Writing: Burger & Dybvig's free-format algorithm ("Printing Floating-Point
+  Numbers Quickly and Accurately", 1996): the shortest digit string that
+  reads back as the same value. Reading: exact quotient of the decimal
+  number by a power of two, rounded half to even.
 
   Layout follows JavaScript's Number.toString: fixed notation when the
   decimal exponent is in -7 < X < 21, else d.dddE[-]X. }
 
-// Significant digits (no leading zeros) and the exponent X such that
-// |AValue| = d1.d2d3... x 10^X. AValue must be finite and non-zero.
-procedure DecimalDigits(AValue: Double; out ADigits: string; out AExp: Integer);
+type
+  // Unsigned big integer, little-endian base 2^32, no high zero words.
+  // Every routine returns a fresh array, so values never alias.
+  TBig = array of Cardinal;
+
+  TFloatFormatInfo = record
+    Precision: Integer;  // mantissa bits, hidden bit included
+    MinE: Integer;       // exponent of the smallest subnormal (value = F * 2^E)
+    MaxE: Integer;       // largest E with a finite value
+  end;
+
+const
+  DoubleFormat: TFloatFormatInfo = (Precision: 53; MinE: -1074; MaxE: 971);
+  SingleFormat: TFloatFormatInfo = (Precision: 24; MinE: -149; MaxE: 104);
+
+function BigTrim(const A: TBig): TBig;
 var
-  S, Mantissa: string;
-  P, I: Integer;
+  N: Integer;
 begin
-{$IFDEF FPC}
-  Str(Abs(AValue), S);
-{$ELSE}
-  S := FloatToStrF(Abs(AValue), ffExponent, 17, 0, GFormatSettings);
-{$ENDIF}
-  S := Trim(S);
-  P := Pos('E', UpperCase(S));
-  Mantissa := Copy(S, 1, P - 1);
-  AExp := StrToInt(Copy(S, P + 1, MaxInt));
-  ADigits := '';
-  for I := 1 to Length(Mantissa) do
-    if (Mantissa[I] >= '0') and (Mantissa[I] <= '9') then
-      ADigits := ADigits + Mantissa[I];
+  N := Length(A);
+  while (N > 0) and (A[N - 1] = 0) do
+    Dec(N);
+  Result := Copy(A, 0, N);
 end;
 
-// Rounds a digit string to ACount digits (half up on the decimal text).
-// A carry out of the first digit (9.99 -> 10.0) increments AExp.
-function RoundDigits(const ADigits: string; ACount: Integer; var AExp: Integer): string;
+function BigFromU64(AValue: UInt64): TBig;
+begin
+  Result := nil;
+  SetLength(Result, 2);
+  Result[0] := Cardinal(AValue and $FFFFFFFF);
+  Result[1] := Cardinal(AValue shr 32);
+  Result := BigTrim(Result);
+end;
+
+function BigCmp(const A, B: TBig): Integer;
 var
   I: Integer;
 begin
-  Result := Copy(ADigits, 1, ACount);
-  if (ACount < Length(ADigits)) and (ADigits[ACount + 1] >= '5') then
+  if Length(A) <> Length(B) then
   begin
-    I := ACount;
-    while (I >= 1) and (Result[I] = '9') do
+    if Length(A) > Length(B) then
+      Exit(1);
+    Exit(-1);
+  end;
+  for I := High(A) downto 0 do
+    if A[I] <> B[I] then
     begin
-      Result[I] := '0';
-      Dec(I);
+      if A[I] > B[I] then
+        Exit(1);
+      Exit(-1);
     end;
-    if I >= 1 then
-      Result[I] := Char(Ord(Result[I]) + 1)
+  Result := 0;
+end;
+
+function BigAdd(const A, B: TBig): TBig;
+var
+  I, N: Integer;
+  X, Y: Cardinal;
+  Sum: UInt64;
+begin
+  N := Length(A);
+  if Length(B) > N then
+    N := Length(B);
+  Result := nil;
+  SetLength(Result, N + 1);
+  Sum := 0;
+  for I := 0 to N - 1 do
+  begin
+    if I < Length(A) then X := A[I] else X := 0;
+    if I < Length(B) then Y := B[I] else Y := 0;
+    Sum := UInt64(X) + Y + (Sum shr 32);
+    Result[I] := Cardinal(Sum and $FFFFFFFF);
+  end;
+  Result[N] := Cardinal(Sum shr 32);
+  Result := BigTrim(Result);
+end;
+
+// A - B, with A >= B.
+function BigSub(const A, B: TBig): TBig;
+var
+  I: Integer;
+  Y: Cardinal;
+  Diff, Borrow: Int64;
+begin
+  Result := nil;
+  SetLength(Result, Length(A));
+  Borrow := 0;
+  for I := 0 to High(A) do
+  begin
+    if I < Length(B) then Y := B[I] else Y := 0;
+    Diff := Int64(A[I]) - Int64(Y) - Borrow;
+    if Diff < 0 then
+    begin
+      Diff := Diff + $100000000;
+      Borrow := 1;
+    end
+    else
+      Borrow := 0;
+    Result[I] := Cardinal(Diff);
+  end;
+  Result := BigTrim(Result);
+end;
+
+function BigMulSmall(const A: TBig; AFactor: Cardinal): TBig;
+var
+  I: Integer;
+  Product: UInt64;
+begin
+  Result := nil;
+  SetLength(Result, Length(A) + 1);
+  Product := 0;
+  for I := 0 to High(A) do
+  begin
+    Product := UInt64(A[I]) * AFactor + (Product shr 32);
+    Result[I] := Cardinal(Product and $FFFFFFFF);
+  end;
+  Result[Length(A)] := Cardinal(Product shr 32);
+  Result := BigTrim(Result);
+end;
+
+function BigMul(const A, B: TBig): TBig;
+var
+  I, J: Integer;
+  Product, Carry: UInt64;
+begin
+  if (Length(A) = 0) or (Length(B) = 0) then
+    Exit(nil);
+  Result := nil;
+  SetLength(Result, Length(A) + Length(B));
+  for I := 0 to High(Result) do
+    Result[I] := 0;
+  for I := 0 to High(A) do
+  begin
+    Carry := 0;
+    for J := 0 to High(B) do
+    begin
+      // (2^32-1)^2 + 2 * (2^32-1) = 2^64 - 1: never overflows.
+      Product := UInt64(A[I]) * B[J] + Result[I + J] + Carry;
+      Result[I + J] := Cardinal(Product and $FFFFFFFF);
+      Carry := Product shr 32;
+    end;
+    Result[I + Length(B)] := Cardinal(Carry);
+  end;
+  Result := BigTrim(Result);
+end;
+
+function BigShl(const A: TBig; ABits: Integer): TBig;
+var
+  Words, Bits, I: Integer;
+  V: UInt64;
+  Carry: Cardinal;
+begin
+  if Length(A) = 0 then
+    Exit(nil);
+  Words := ABits div 32;
+  Bits := ABits mod 32;
+  Result := nil;
+  SetLength(Result, Length(A) + Words + 1);
+  for I := 0 to Words - 1 do
+    Result[I] := 0;
+  Carry := 0;
+  for I := 0 to High(A) do
+  begin
+    V := (UInt64(A[I]) shl Bits) or Carry;
+    Result[I + Words] := Cardinal(V and $FFFFFFFF);
+    Carry := Cardinal(V shr 32);
+  end;
+  Result[Length(A) + Words] := Carry;
+  Result := BigTrim(Result);
+end;
+
+function BigPow10(AExp: Integer): TBig;
+begin
+  Result := BigFromU64(1);
+  while AExp >= 9 do
+  begin
+    Result := BigMulSmall(Result, 1000000000);
+    Dec(AExp, 9);
+  end;
+  while AExp > 0 do
+  begin
+    Result := BigMulSmall(Result, 10);
+    Dec(AExp);
+  end;
+end;
+
+function BigBitLength(const A: TBig): Integer;
+var
+  X: Cardinal;
+begin
+  if Length(A) = 0 then
+    Exit(0);
+  Result := (Length(A) - 1) * 32;
+  X := A[High(A)];
+  while X <> 0 do
+  begin
+    Inc(Result);
+    X := X shr 1;
+  end;
+end;
+
+function BigFromDigits(const ADigits: string): TBig;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 1 to Length(ADigits) do
+    Result := BigAdd(BigMulSmall(Result, 10), BigFromU64(Ord(ADigits[I]) - Ord('0')));
+end;
+
+{ Writing }
+
+// Shortest digits d1d2...dn and K such that the value is 0.d1d2...dn x 10^K
+// (Burger & Dybvig, free-format, IEEE round-half-even reader assumed).
+procedure ShortestDigits(AF: UInt64; AE: Integer; const AFormat: TFloatFormatInfo;
+  AValue: Double; out ADigits: string; out AK: Integer);
+var
+  R, S, MPlus, MMinus, Scale, T: TBig;
+  Est, D: Integer;
+  Hidden: UInt64;
+  Even, TooLow, TooHigh: Boolean;
+begin
+  Even := (AF and 1) = 0;
+  Hidden := UInt64(1) shl (AFormat.Precision - 1);
+  if AE >= 0 then
+  begin
+    if AF <> Hidden then
+    begin
+      R := BigShl(BigFromU64(AF), AE + 1);
+      S := BigFromU64(2);
+      MPlus := BigShl(BigFromU64(1), AE);
+      MMinus := MPlus;
+    end
     else
     begin
-      Result := '1' + Result;
-      SetLength(Result, ACount);
-      Inc(AExp);
+      // Power of two: the gap below is half the gap above.
+      R := BigShl(BigFromU64(AF), AE + 2);
+      S := BigFromU64(4);
+      MPlus := BigShl(BigFromU64(1), AE + 1);
+      MMinus := BigShl(BigFromU64(1), AE);
     end;
+  end
+  else if (AE = AFormat.MinE) or (AF <> Hidden) then
+  begin
+    R := BigShl(BigFromU64(AF), 1);
+    S := BigShl(BigFromU64(1), 1 - AE);
+    MPlus := BigFromU64(1);
+    MMinus := MPlus;
+  end
+  else
+  begin
+    R := BigShl(BigFromU64(AF), 2);
+    S := BigShl(BigFromU64(1), 2 - AE);
+    MPlus := BigFromU64(2);
+    MMinus := BigFromU64(1);
   end;
-  I := Length(Result);
-  while (I > 1) and (Result[I] = '0') do
-    Dec(I);
-  SetLength(Result, I);
+
+  // Estimate K; the fixup below corrects an estimate one too low.
+  Est := Ceil(Log10(AValue) - 1E-10);
+  if Est >= 0 then
+    S := BigMul(S, BigPow10(Est))
+  else
+  begin
+    Scale := BigPow10(-Est);
+    R := BigMul(R, Scale);
+    MPlus := BigMul(MPlus, Scale);
+    MMinus := BigMul(MMinus, Scale);
+  end;
+  T := BigAdd(R, MPlus);
+  if (BigCmp(T, S) > 0) or (Even and (BigCmp(T, S) = 0)) then
+    AK := Est + 1
+  else
+  begin
+    AK := Est;
+    R := BigMulSmall(R, 10);
+    MPlus := BigMulSmall(MPlus, 10);
+    MMinus := BigMulSmall(MMinus, 10);
+  end;
+
+  ADigits := '';
+  while True do
+  begin
+    D := 0;
+    while BigCmp(R, S) >= 0 do
+    begin
+      R := BigSub(R, S);
+      Inc(D);
+    end;
+    TooLow := (BigCmp(R, MMinus) < 0) or (Even and (BigCmp(R, MMinus) = 0));
+    T := BigAdd(R, MPlus);
+    TooHigh := (BigCmp(T, S) > 0) or (Even and (BigCmp(T, S) = 0));
+    if not TooLow and not TooHigh then
+    begin
+      ADigits := ADigits + Char(Ord('0') + D);
+      R := BigMulSmall(R, 10);
+      MPlus := BigMulSmall(MPlus, 10);
+      MMinus := BigMulSmall(MMinus, 10);
+      Continue;
+    end;
+    if TooLow and TooHigh then
+    begin
+      // Both neighbours' digits work: take the closer one.
+      if BigCmp(BigShl(R, 1), S) >= 0 then
+        Inc(D);
+    end
+    else if TooHigh then
+      Inc(D);
+    ADigits := ADigits + Char(Ord('0') + D);
+    Break;
+  end;
 end;
 
 function LayoutNumber(ANegative: Boolean; const ADigits: string; AExp: Integer): string;
@@ -802,49 +1073,283 @@ end;
 
 function JsonFloatToStr(AValue: Double): string;
 var
-  Digits, Candidate: string;
-  Exp, E, P: Integer;
-  Back: Double;
+  Bits, Mantissa: UInt64;
+  Biased, E, K: Integer;
+  F: UInt64;
+  Digits: string;
 begin
   CheckFinite(AValue);
   if AValue = 0 then
     Exit('0');
-  DecimalDigits(AValue, Digits, Exp);
-  Result := '';
-  for P := 1 to Length(Digits) do
+  Move(AValue, Bits, SizeOf(Bits));
+  Mantissa := Bits and ((UInt64(1) shl 52) - 1);
+  Biased := Integer((Bits shr 52) and $7FF);
+  if Biased = 0 then
   begin
-    E := Exp;
-    Candidate := RoundDigits(Digits, P, E);
-    Result := LayoutNumber(AValue < 0, Candidate, E);
-    // Through a Double: on Delphi Win32 StrToFloat returns an 80-bit
-    // Extended, which never equals the Double it should round-trip to.
-    Back := StrToFloat(Result, GFormatSettings);
-    if Back = AValue then
-      Exit;
+    F := Mantissa;
+    E := DoubleFormat.MinE;
+  end
+  else
+  begin
+    F := Mantissa or (UInt64(1) shl 52);
+    E := Biased - 1075;
   end;
+  ShortestDigits(F, E, DoubleFormat, Abs(AValue), Digits, K);
+  Result := LayoutNumber(AValue < 0, Digits, K - 1);
 end;
 
 function JsonSingleToStr(AValue: Single): string;
 var
-  Digits, Candidate: string;
-  Exp, E, P: Integer;
-  Back: Single;
+  Bits, Mantissa: Cardinal;
+  Biased, E, K: Integer;
+  F: UInt64;
+  Digits: string;
 begin
   CheckFinite(AValue);
   if AValue = 0 then
     Exit('0');
-  // A Single is exactly representable as a Double: expand that.
-  DecimalDigits(AValue, Digits, Exp);
-  Result := '';
-  for P := 1 to Length(Digits) do
+  Move(AValue, Bits, SizeOf(Bits));
+  Mantissa := Bits and $7FFFFF;
+  Biased := Integer((Bits shr 23) and $FF);
+  if Biased = 0 then
   begin
-    E := Exp;
-    Candidate := RoundDigits(Digits, P, E);
-    Result := LayoutNumber(AValue < 0, Candidate, E);
-    Back := StrToFloat(Result, GFormatSettings);
-    if Back = AValue then
+    F := Mantissa;
+    E := SingleFormat.MinE;
+  end
+  else
+  begin
+    F := Mantissa or $800000;
+    E := Biased - 150;
+  end;
+  ShortestDigits(F, E, SingleFormat, Abs(AValue), Digits, K);
+  Result := LayoutNumber(AValue < 0, Digits, K - 1);
+end;
+
+{ Reading }
+
+const
+  // Significant digits kept when reading. Beyond this, only "were the dropped
+  // digits all zero?" can change the rounding, and a sticky digit keeps that.
+  MaxSignificantDigits = 800;
+
+// Splits a JSON number into sign, significant digits (no leading/trailing
+// zeros) and a decimal exponent: value = Digits x 10^Exp10.
+function SplitNumber(const AText: string; out ANegative: Boolean;
+  out ADigits: string; out AExp10: Integer): Boolean;
+var
+  I, L, FracLen, ExpValue: Integer;
+  ExpNegative, Sticky: Boolean;
+  IntPart, FracPart: string;
+begin
+  Result := False;
+  L := Length(AText);
+  I := 1;
+  ANegative := (I <= L) and (AText[I] = '-');
+  if ANegative then
+    Inc(I);
+  IntPart := '';
+  while (I <= L) and (AText[I] >= '0') and (AText[I] <= '9') do
+  begin
+    IntPart := IntPart + AText[I];
+    Inc(I);
+  end;
+  if IntPart = '' then
+    Exit;
+  FracPart := '';
+  if (I <= L) and (AText[I] = '.') then
+  begin
+    Inc(I);
+    while (I <= L) and (AText[I] >= '0') and (AText[I] <= '9') do
+    begin
+      FracPart := FracPart + AText[I];
+      Inc(I);
+    end;
+    if FracPart = '' then
       Exit;
   end;
+  ExpValue := 0;
+  if (I <= L) and ((AText[I] = 'e') or (AText[I] = 'E')) then
+  begin
+    Inc(I);
+    ExpNegative := (I <= L) and (AText[I] = '-');
+    if (I <= L) and ((AText[I] = '-') or (AText[I] = '+')) then
+      Inc(I);
+    if (I > L) or (AText[I] < '0') or (AText[I] > '9') then
+      Exit;
+    while (I <= L) and (AText[I] >= '0') and (AText[I] <= '9') do
+    begin
+      // Saturate: anything past 10^6 is overflow or zero anyway.
+      if ExpValue < 1000000 then
+        ExpValue := ExpValue * 10 + Ord(AText[I]) - Ord('0');
+      Inc(I);
+    end;
+    if ExpNegative then
+      ExpValue := -ExpValue;
+  end;
+  if I <= L then
+    Exit;
+
+  FracLen := Length(FracPart);
+  ADigits := IntPart + FracPart;
+  AExp10 := ExpValue - FracLen;
+  I := 1;
+  while (I < Length(ADigits)) and (ADigits[I] = '0') do
+    Inc(I);
+  ADigits := Copy(ADigits, I, MaxInt);
+  L := Length(ADigits);
+  while (L > 0) and (ADigits[L] = '0') do
+  begin
+    Dec(L);
+    Inc(AExp10);
+  end;
+  SetLength(ADigits, L);
+  if ADigits = '' then
+    ADigits := '0';
+  if Length(ADigits) > MaxSignificantDigits then
+  begin
+    Sticky := False;
+    for I := MaxSignificantDigits + 1 to Length(ADigits) do
+      if ADigits[I] <> '0' then
+        Sticky := True;
+    Inc(AExp10, Length(ADigits) - MaxSignificantDigits);
+    SetLength(ADigits, MaxSignificantDigits);
+    if Sticky then
+    begin
+      ADigits := ADigits + '1';
+      Dec(AExp10);
+    end;
+  end;
+  Result := True;
+end;
+
+// Quotient of N / D known to be below 2^(AMaxBits + 1); Rem gets N mod D.
+function BigDivSmallQuotient(const N, D: TBig; AMaxBits: Integer; out ARem: TBig): UInt64;
+var
+  B: Integer;
+  T: TBig;
+begin
+  Result := 0;
+  ARem := N;
+  for B := AMaxBits downto 0 do
+  begin
+    T := BigShl(D, B);
+    if BigCmp(ARem, T) >= 0 then
+    begin
+      ARem := BigSub(ARem, T);
+      Result := Result or (UInt64(1) shl B);
+    end;
+  end;
+end;
+
+// Digits x 10^Exp10 as F x 2^E, correctly rounded (half to even) to the
+// format. False on overflow. F = 0 on underflow to zero.
+function DecimalToBinary(const ADigits: string; AExp10: Integer;
+  const AFormat: TFloatFormatInfo; out AF: UInt64; out AE: Integer): Boolean;
+var
+  N, D, NS, DS, Rem: TBig;
+  Q, Limit: UInt64;
+  Cmp: Integer;
+begin
+  AF := 0;
+  AE := 0;
+  Result := True;
+  if ADigits = '0' then
+    Exit;
+  // Magnitude bounds, before any big arithmetic: 10^(n+Exp10-1) <= value.
+  if Length(ADigits) + AExp10 > 310 then
+    Exit(False);
+  if Length(ADigits) + AExp10 < -330 then
+    Exit;
+
+  N := BigFromDigits(ADigits);
+  if AExp10 >= 0 then
+  begin
+    N := BigMul(N, BigPow10(AExp10));
+    D := BigFromU64(1);
+  end
+  else
+    D := BigPow10(-AExp10);
+
+  Limit := UInt64(1) shl AFormat.Precision;
+  AE := BigBitLength(N) - BigBitLength(D) - AFormat.Precision;
+  while True do
+  begin
+    if AE < AFormat.MinE then
+      AE := AFormat.MinE;
+    if AE >= 0 then
+    begin
+      NS := N;
+      DS := BigShl(D, AE);
+    end
+    else
+    begin
+      NS := BigShl(N, -AE);
+      DS := D;
+    end;
+    Q := BigDivSmallQuotient(NS, DS, AFormat.Precision + 1, Rem);
+    if Q < Limit then
+      Break;
+    Inc(AE);
+  end;
+
+  Cmp := BigCmp(BigShl(Rem, 1), DS);
+  if (Cmp > 0) or ((Cmp = 0) and ((Q and 1) = 1)) then
+  begin
+    Inc(Q);
+    if Q = Limit then
+    begin
+      Q := Q shr 1;
+      Inc(AE);
+    end;
+  end;
+  if AE > AFormat.MaxE then
+    Exit(False);
+  AF := Q;
+end;
+
+procedure ReadFloat(const AText: string; const AFormat: TFloatFormatInfo;
+  out ANegative: Boolean; out AF: UInt64; out AE: Integer);
+var
+  Digits: string;
+  Exp10: Integer;
+begin
+  if not SplitNumber(AText, ANegative, Digits, Exp10) then
+    raise EJsonError.CreateFmt('Invalid number "%s"', [AText]);
+  if not DecimalToBinary(Digits, Exp10, AFormat, AF, AE) then
+    raise EJsonError.CreateFmt('Number %s is out of range', [AText]);
+end;
+
+function JsonStrToDouble(const AText: string): Double;
+var
+  Negative: Boolean;
+  F, Bits: UInt64;
+  E: Integer;
+begin
+  ReadFloat(AText, DoubleFormat, Negative, F, E);
+  if F < (UInt64(1) shl 52) then
+    Bits := F  // subnormal or zero: E = MinE
+  else
+    Bits := (UInt64(E + 1075) shl 52) or (F and ((UInt64(1) shl 52) - 1));
+  if Negative then
+    Bits := Bits or (UInt64(1) shl 63);
+  Move(Bits, Result, SizeOf(Result));
+end;
+
+function JsonStrToSingle(const AText: string): Single;
+var
+  Negative: Boolean;
+  F: UInt64;
+  Bits: Cardinal;
+  E: Integer;
+begin
+  ReadFloat(AText, SingleFormat, Negative, F, E);
+  if F < $800000 then
+    Bits := Cardinal(F)
+  else
+    Bits := (Cardinal(E + 150) shl 23) or (Cardinal(F) and $7FFFFF);
+  if Negative then
+    Bits := Bits or $80000000;
+  Move(Bits, Result, SizeOf(Result));
 end;
 
 function JsonCurrencyToStr(AValue: Currency): string;

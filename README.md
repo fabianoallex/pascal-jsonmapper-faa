@@ -45,7 +45,9 @@ Json := TJsonMapper.Shared.ToJson<IProduct>(Product);   // {"name":"Rice","price
 
 ## JSON layer
 
-`PascalJsonMapper.Json` is a small DOM, parser and writer of its own, not System.JSON or fpjson. Output is byte-identical on both compilers. Numbers keep their source text, so an `Int64` above 2^53 survives a round trip, and floats are written as the shortest text that reads back exactly. That second point needed work: FPC 3.2.2 Win64's `FloatToStrF` stops at ~15 digits.
+`PascalJsonMapper.Json` is a small DOM, parser and writer of its own, not System.JSON or fpjson. Output is byte-identical on both compilers. Numbers keep their source text, so an `Int64` above 2^53 survives a round trip.
+
+`Double`/`Single` conversion doesn't use the RTL either. Writing uses Burger & Dybvig's algorithm, which gives the shortest text that reads back exactly. Reading rounds half to even. Both use exact integer arithmetic, so every compiler and target produces the same text and the same bits. The RTL's conversions differ in the last digit: FPC 3.2.2 Win64's `FloatToStrF` stops at 15 digits, and Delphi 12 Win64 printed `0.30000000000000004` as `0.30000000000000006`.
 
 ## Tests
 
