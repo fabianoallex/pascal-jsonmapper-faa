@@ -11,6 +11,13 @@
         </Projects>
         <!-- SCAFFOLD:PROJECTS -->
     </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
     <Target Name="PascalJsonMapper">
         <MSBuild Projects="PascalJsonMapper.dproj"/>
     </Target>
@@ -20,24 +27,24 @@
     <Target Name="PascalJsonMapper:Make">
         <MSBuild Projects="PascalJsonMapper.dproj" Targets="Make"/>
     </Target>
-    <Target Name="PascalJsonMapperUnitTests">
+    <Target Name="PascalJsonMapper_UnitTests">
         <MSBuild Projects="tests\Unit\PascalJsonMapper.UnitTests.dproj"/>
     </Target>
-    <Target Name="PascalJsonMapperUnitTests:Clean">
+    <Target Name="PascalJsonMapper_UnitTests:Clean">
         <MSBuild Projects="tests\Unit\PascalJsonMapper.UnitTests.dproj" Targets="Clean"/>
     </Target>
-    <Target Name="PascalJsonMapperUnitTests:Make">
+    <Target Name="PascalJsonMapper_UnitTests:Make">
         <MSBuild Projects="tests\Unit\PascalJsonMapper.UnitTests.dproj" Targets="Make"/>
     </Target>
     <!-- SCAFFOLD:TARGETS -->
     <Target Name="Build">
-        <CallTarget Targets="PascalJsonMapper;PascalJsonMapperUnitTests"/>
+        <CallTarget Targets="PascalJsonMapper;PascalJsonMapper_UnitTests"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="PascalJsonMapper:Clean;PascalJsonMapperUnitTests:Clean"/>
+        <CallTarget Targets="PascalJsonMapper:Clean;PascalJsonMapper_UnitTests:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="PascalJsonMapper:Make;PascalJsonMapperUnitTests:Make"/>
+        <CallTarget Targets="PascalJsonMapper:Make;PascalJsonMapper_UnitTests:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>
