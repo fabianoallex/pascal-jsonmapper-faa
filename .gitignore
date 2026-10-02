@@ -21,8 +21,9 @@ linux/
 *.res
 
 # ELF binaries (no extension) produced by lazbuild on Linux
-/PascalJsonMapper
 tests/Unit/fpc/PascalJsonMapperUnitTestsFpc
+samples/01-basics/Basics
+samples/02-custom-converter/CustomConverter
 
 # DUnitX NUnit XML output
 dunitx-results.xml

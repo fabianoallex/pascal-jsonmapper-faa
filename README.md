@@ -31,7 +31,16 @@ Product := TJsonMapper.Shared.FromJson<IProduct>('{"name":"Rice","price":12.5}')
 Json := TJsonMapper.Shared.ToJson<IProduct>(Product);   // {"name":"Rice","price":12.5}
 ```
 
-`PascalJsonMapper.dpr` at the root is this example, runnable on both compilers.
+## Samples
+
+[`samples/`](samples/README.md) has runnable console programs, one source file each for both compilers:
+
+| Sample | Shows |
+|---|---|
+| [01-basics](samples/01-basics/Basics.dpr) | DTO interfaces with nested arrays, `FromJson`/`ToJson`, `Naming`, `PopulateObject` on an existing object, errors with JSON path and position |
+| [02-custom-converter](samples/02-custom-converter/CustomConverter.dpr) | `IJsonConverter`: a different format for a known type, a new type (a money value object), omitting a member |
+
+Optionals (absent / null / value, as in a PATCH) are shown with pascal-db-faa's types in its own [06-json](https://github.com/fabianoallex/pascal-db-faa/tree/main/samples/06-json) sample.
 
 ## Contract
 
@@ -64,6 +73,7 @@ On Linux, through Docker, the same suite builds with plain `fpc` from a read-onl
 
 ```
 sh tools/test_fpc_docker.sh             # FPC_IMAGE=<image with FPC 3.2.2>, default fpc322-bookworm
+sh tools/test_samples_docker.sh         # builds and runs the samples, diffs each output with its expected.txt
 ```
 
 On Delphi, open `PascalJsonMapper.groupproj` and run `PascalJsonMapper.UnitTests`. "Build All" only builds the active platform, so switch the target platform to build Win64. Every suite must end with 0 leaks.

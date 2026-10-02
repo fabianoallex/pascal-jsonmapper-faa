@@ -3,12 +3,17 @@
   <ProjectGroup FileVersion="2">
     <Targets>
       <Target FileName="packages\pascaljsonmapper_pkg.lpk"/>
-      <Target FileName="PascalJsonMapper.lpi">
+      <Target FileName="tests\Unit\fpc\PascalJsonMapperUnitTestsFpc.lpi">
         <BuildModes>
           <Mode Name="Default"/>
         </BuildModes>
       </Target>
-      <Target FileName="tests\Unit\fpc\PascalJsonMapperUnitTestsFpc.lpi">
+      <Target FileName="samples\01-basics\Basics.lpi">
+        <BuildModes>
+          <Mode Name="Default"/>
+        </BuildModes>
+      </Target>
+      <Target FileName="samples\02-custom-converter\CustomConverter.lpi">
         <BuildModes>
           <Mode Name="Default"/>
         </BuildModes>

@@ -1,0 +1,24 @@
+
+== 1. JSON -> IOrder
+id:       9007199254740993  (2^53 + 1: kept exact as Int64)
+customer: Ana
+status:   1 (osPaid)
+created:  2026-10-02T14:30:00
+item 0:   RICE-5KG x2 @ 27.9
+item 1:   BEANS-1KG x3 @ 8.45
+total:    81.15
+
+== 2. IOrder -> JSON
+{"id":9007199254740993,"customer":"Ana","status":"osShipped","createdAt":"2026-10-02T14:30:00","items":[{"sku":"RICE-5KG","qty":2,"price":27.9},{"sku":"BEANS-1KG","qty":3,"price":8.45},{"sku":"SALT-1KG","qty":1,"price":3.2}]}
+
+== 3. Naming := jnAsDeclared
+{"Sku":"RICE-5KG","Qty":2,"Price":27.9}
+
+== 4. PopulateObject on an existing object
+defaults: {"name":"unnamed","workers":4,"database":{"host":"localhost","port":5432}}
+after:    {"name":"billing","workers":4,"database":{"host":"localhost","port":6543}}
+
+== 5. Bad input
+EJsonMapperError: $.items[1].qty: expected integer, found JSON string
+EJsonMapperError: $.status: "osLost" is not a value of TOrderStatus
+EJsonParseError:  Member name expected (at position 29)

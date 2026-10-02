@@ -3,10 +3,13 @@
         <ProjectGuid>{2AC643C8-365E-41F3-B61D-9F21755A703B}</ProjectGuid>
     </PropertyGroup>
     <ItemGroup>
-        <Projects Include="PascalJsonMapper.dproj">
+        <Projects Include="tests\Unit\PascalJsonMapper.UnitTests.dproj">
             <Dependencies/>
         </Projects>
-        <Projects Include="tests\Unit\PascalJsonMapper.UnitTests.dproj">
+        <Projects Include="samples\01-basics\Basics.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="samples\02-custom-converter\CustomConverter.dproj">
             <Dependencies/>
         </Projects>
         <!-- SCAFFOLD:PROJECTS -->
@@ -18,15 +21,6 @@
             <Default.Personality/>
         </BorlandProject>
     </ProjectExtensions>
-    <Target Name="PascalJsonMapper">
-        <MSBuild Projects="PascalJsonMapper.dproj"/>
-    </Target>
-    <Target Name="PascalJsonMapper:Clean">
-        <MSBuild Projects="PascalJsonMapper.dproj" Targets="Clean"/>
-    </Target>
-    <Target Name="PascalJsonMapper:Make">
-        <MSBuild Projects="PascalJsonMapper.dproj" Targets="Make"/>
-    </Target>
     <Target Name="PascalJsonMapper_UnitTests">
         <MSBuild Projects="tests\Unit\PascalJsonMapper.UnitTests.dproj"/>
     </Target>
@@ -36,15 +30,33 @@
     <Target Name="PascalJsonMapper_UnitTests:Make">
         <MSBuild Projects="tests\Unit\PascalJsonMapper.UnitTests.dproj" Targets="Make"/>
     </Target>
+    <Target Name="Basics">
+        <MSBuild Projects="samples\01-basics\Basics.dproj"/>
+    </Target>
+    <Target Name="Basics:Clean">
+        <MSBuild Projects="samples\01-basics\Basics.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="Basics:Make">
+        <MSBuild Projects="samples\01-basics\Basics.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="CustomConverter">
+        <MSBuild Projects="samples\02-custom-converter\CustomConverter.dproj"/>
+    </Target>
+    <Target Name="CustomConverter:Clean">
+        <MSBuild Projects="samples\02-custom-converter\CustomConverter.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="CustomConverter:Make">
+        <MSBuild Projects="samples\02-custom-converter\CustomConverter.dproj" Targets="Make"/>
+    </Target>
     <!-- SCAFFOLD:TARGETS -->
     <Target Name="Build">
-        <CallTarget Targets="PascalJsonMapper;PascalJsonMapper_UnitTests"/>
+        <CallTarget Targets="PascalJsonMapper_UnitTests;Basics;CustomConverter"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="PascalJsonMapper:Clean;PascalJsonMapper_UnitTests:Clean"/>
+        <CallTarget Targets="PascalJsonMapper_UnitTests:Clean;Basics:Clean;CustomConverter:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="PascalJsonMapper:Make;PascalJsonMapper_UnitTests:Make"/>
+        <CallTarget Targets="PascalJsonMapper_UnitTests:Make;Basics:Make;CustomConverter:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

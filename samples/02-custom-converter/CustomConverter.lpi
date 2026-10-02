@@ -10,7 +10,7 @@
         <MainUnitHasScaledStatement Value="False"/>
       </Flags>
       <SessionStorage Value="InProjectDir"/>
-      <Title Value="PascalJsonMapper"/>
+      <Title Value="CustomConverter"/>
       <UseAppBundle Value="False"/>
       <ResourceType Value="res"/>
     </General>
@@ -24,14 +24,10 @@
     <RunParams>
       <FormatVersion Value="2"/>
     </RunParams>
-    <RequiredPackages>
-      <Item>
-        <PackageName Value="pascaljsonmapper_pkg"/>
-      </Item>
-    </RequiredPackages>
+
     <Units>
       <Unit>
-        <Filename Value="PascalJsonMapper.dpr"/>
+        <Filename Value="CustomConverter.dpr"/>
         <IsPartOfProject Value="True"/>
       </Unit>
     </Units>
@@ -40,10 +36,11 @@
     <Version Value="11"/>
     <PathDelim Value="\"/>
     <Target>
-      <Filename Value="PascalJsonMapper"/>
+      <Filename Value="CustomConverter"/>
     </Target>
     <SearchPaths>
-
+      <IncludeFiles Value="..\..\src"/>
+      <OtherUnitFiles Value="..\..\src"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>

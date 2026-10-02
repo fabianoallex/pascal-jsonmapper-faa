@@ -1,6 +1,6 @@
 ﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
-        <ProjectGuid>{D570B915-8DF0-4883-A419-B36B7DE5F47E}</ProjectGuid>
+        <ProjectGuid>{EB284EBC-FCDC-40F9-98F8-34DF30F0547B}</ProjectGuid>
         <ProjectVersion>20.1</ProjectVersion>
         <FrameworkType>None</FrameworkType>
         <Base>True</Base>
@@ -8,8 +8,8 @@
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Console</AppType>
-        <MainSource>PascalJsonMapper.dpr</MainSource>
-        <ProjectName Condition="'$(ProjectName)'==''">PascalJsonMapper</ProjectName>
+        <MainSource>CustomConverter.dpr</MainSource>
+        <ProjectName Condition="'$(ProjectName)'==''">CustomConverter</ProjectName>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
         <Base>true</Base>
@@ -38,8 +38,8 @@
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
         <DCC_ExeOutput>.\$(Platform)\$(Config)</DCC_ExeOutput>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
-        <DCC_UnitSearchPath>src;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
-        <SanitizedProjectName>PascalJsonMapper</SanitizedProjectName>
+        <DCC_UnitSearchPath>..\..\src;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <SanitizedProjectName>CustomConverter</SanitizedProjectName>
         <UsingDelphiRTL>true</UsingDelphiRTL>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win32)'!=''">
@@ -86,7 +86,7 @@
         <BorlandProject>
             <Delphi.Personality>
                 <Source>
-                    <Source Name="MainSource">PascalJsonMapper.dpr</Source>
+                    <Source Name="MainSource">CustomConverter.dpr</Source>
                 </Source>
             </Delphi.Personality>
             <Platforms>

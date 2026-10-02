@@ -1,0 +1,23 @@
+
+== Without converters
+the enum goes out by name. TOptionalDate is a type of its own, not
+TDateTime, so it is just a number of days (0 included). And IMoney
+has no registered class, so reading one fails:
+{"number":1042,"status":"isSent","total":null,"dueDate":46327,"paidAt":0}
+error: $.total: no class registered for interface IMoney (RegisterMapping), and no IJsonConverter accepts it
+
+== With converters: writing
+not paid yet (paidAt = 0 is left out):
+{"number":1042,"status":"sent","total":"1234.50 BRL","dueDate":"2026-11-01T00:00:00"}
+paid:
+{"number":1042,"status":"paid","total":"1234.50 BRL","dueDate":"2026-11-01T00:00:00","paidAt":"2026-10-30T09:15:00"}
+
+== With converters: reading
+ok:    {"number":7,"status":"draft","total":"99.90 USD"}
+ok:    {"number":8,"status":"paid","total":"10.00 BRL","paidAt":"2026-10-01T15:00:00"}
+
+== With converters: bad input
+error: $.status: unknown invoice status "refunded"
+error: $.status: JSON string expected, found number
+error: $.total: "ten reais" is not "<amount> <currency>"
+error: $.dueDate: Invalid ISO 8601 date/time: "01/11/2026"
