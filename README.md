@@ -6,6 +6,8 @@ JSON ⇄ object mapper for Object Pascal that compiles and behaves the same on *
 
 It extracts the idea of `Common.JsonMapper` from `delphi-api-infra-faa` (DTO interfaces, `RegisterMapping<I, C>`, `FromJson<I>`/`ToJson<I>`). It is not a drop-in replacement for that mapper.
 
+Current version: **0.1.0**. While it is 0.x the API may still change between minor versions; every change is listed in the [changelog](CHANGELOG.md).
+
 ## Usage
 
 ```pascal
