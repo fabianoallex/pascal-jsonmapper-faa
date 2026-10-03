@@ -67,6 +67,10 @@ type
     procedure Write_Currency;
     [Test]
     procedure Write_NaN_Raises;
+    [Test]
+    procedure Write_Indented;
+    [Test]
+    procedure Write_Indented_DropsOmittedMembers;
   end;
 
   [TestFixture]
@@ -388,6 +392,72 @@ begin
   except
     on E: EJsonError do
       ;
+  end;
+end;
+
+procedure TJsonWriterTests.Write_Indented;
+var
+  W: TJsonWriter;
+begin
+  W := TJsonWriter.Create(2);
+  try
+    W.BeginObject;
+    W.Name('a');
+    W.WriteInt64(1);
+    W.Name('b');
+    W.BeginArray;
+    W.WriteInt64(1);
+    W.BeginObject;
+    W.EndObject;
+    W.BeginArray;
+    W.EndArray;
+    W.EndArray;
+    W.Name('c');
+    W.BeginObject;
+    W.Name('d');
+    W.WriteNull;
+    W.EndObject;
+    W.EndObject;
+    TAssert.AssertEquals('{'#10 +
+      '  "a": 1,'#10 +
+      '  "b": ['#10 +
+      '    1,'#10 +
+      '    {},'#10 +
+      '    []'#10 +
+      '  ],'#10 +
+      '  "c": {'#10 +
+      '    "d": null'#10 +
+      '  }'#10 +
+      '}', W.ToString);
+  finally
+    W.Free;
+  end;
+end;
+
+procedure TJsonWriterTests.Write_Indented_DropsOmittedMembers;
+var
+  W: TJsonWriter;
+begin
+  W := TJsonWriter.Create(4);
+  try
+    W.BeginObject;
+    W.Name('omitted');
+    W.EndObject;
+    TAssert.AssertEquals('{}', W.ToString);
+  finally
+    W.Free;
+  end;
+  W := TJsonWriter.Create(1);
+  try
+    W.BeginObject;
+    W.Name('omitted');
+    W.Name('kept');
+    W.WriteBoolean(True);
+    W.Name('omitted');
+    W.EndObject;
+    TAssert.AssertEquals('{'#10' "kept": true'#10'}', W.ToString);
+  finally
+    W.Free;
   end;
 end;
 

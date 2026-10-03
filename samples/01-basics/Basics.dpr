@@ -13,6 +13,8 @@
      whose members absent from the JSON keep their defaults.
   5. What bad input looks like: a value of the wrong type is reported with
      its JSON path, malformed JSON with its position.
+  6. A list at the top level (Serialize / Deserialize of an array type,
+     what a GET of a collection returns) and indented output.
 
   The DTOs live in this file to keep the sample in one place; a real
   application declares each in its own unit and registers it in that unit's
@@ -323,6 +325,29 @@ begin
   end;
 end;
 
+procedure ListsAndIndent;
+var
+  Mapper: TJsonMapper;
+  Items: TOrderItems;
+begin
+  Title('6. A list at the top level, indented');
+  // Any supported type works at the top level, arrays included. On FPC
+  // name the array type (TOrderItems): Serialize<TArray<IOrderItem>>
+  // doesn't parse there, ">>" reads as shr.
+  Items := TJsonMapper.Shared.Deserialize<TOrderItems>(
+    '[{"sku": "RICE-5KG", "qty": 2, "price": 27.9}, {"sku": "SALT-1KG", "qty": 1, "price": 3.2}]');
+  Writeln('read ', Length(Items), ' items; written back with Indent := 2:');
+  Mapper := TJsonMapper.Create;
+  try
+    Mapper.RegisterMapping<IOrderItem, TOrderItem>;
+    Mapper.Indent := 2;
+    Writeln(Mapper.Serialize<TOrderItems>(Items));
+  finally
+    Items := nil;
+    Mapper.Free;
+  end;
+end;
+
 begin
   try
     // A real application does this in the initialization of the unit that
@@ -335,6 +360,7 @@ begin
     DeclaredNames;
     PopulateSettings;
     BadInput;
+    ListsAndIndent;
   except
     on E: Exception do
     begin

@@ -81,7 +81,7 @@ type
     // Object lookup; nil if absent. First match wins on duplicate names.
     function Find(const AName: string; AIgnoreCase: Boolean = False): TJsonValue;
 
-    function ToJson: string;
+    function ToJson(AIndent: Integer = 0): string;
   end;
 
   { Appends JSON text. Tracks commas itself, so callers just emit tokens in
@@ -90,7 +90,11 @@ type
     Name() is deferred: the member name is only emitted together with the
     next value. A Name() followed by another Name() or by EndObject is
     dropped, which is how a converter omits a member (it simply writes
-    nothing). }
+    nothing).
+
+    Indent > 0 puts every member and element on a line of its own, indented
+    by that many spaces per level, with ": " after names. Line breaks are
+    always #10, on every platform, so the text is the same everywhere. }
   TJsonWriter = class
   private
     FBuf: string;
@@ -99,14 +103,16 @@ type
     FDepth: Integer;
     FPendingName: string;
     FHasPendingName: Boolean;
+    FIndent: Integer;
     procedure Raw(const S: string);
+    procedure NewLine(ADepth: Integer);
     procedure RawChar(C: Char);
     procedure BeforeValue;
     procedure Push;
     procedure Pop;
     procedure WriteQuoted(const AValue: string);
   public
-    constructor Create;
+    constructor Create(AIndent: Integer = 0);
     procedure BeginObject;
     procedure EndObject;
     procedure BeginArray;
@@ -123,6 +129,7 @@ type
     procedure WriteNumberText(const AText: string);
     procedure WriteValue(AValue: TJsonValue);
     function ToString: string; override;
+    property Indent: Integer read FIndent;
   end;
 
 // Parses a complete JSON text. Raises EJsonParseError on any syntax error or
@@ -364,11 +371,11 @@ begin
   Result := nil;
 end;
 
-function TJsonValue.ToJson: string;
+function TJsonValue.ToJson(AIndent: Integer): string;
 var
   W: TJsonWriter;
 begin
-  W := TJsonWriter.Create;
+  W := TJsonWriter.Create(AIndent);
   try
     W.WriteValue(Self);
     Result := W.ToString;
@@ -1611,9 +1618,10 @@ end;
 
 { TJsonWriter }
 
-constructor TJsonWriter.Create;
+constructor TJsonWriter.Create(AIndent: Integer);
 begin
   inherited Create;
+  FIndent := AIndent;
   SetLength(FBuf, 256);
   SetLength(FNeedComma, 16);
   FNeedComma[0] := False;
@@ -1640,16 +1648,29 @@ begin
   FBuf[FLen] := C;
 end;
 
+procedure TJsonWriter.NewLine(ADepth: Integer);
+begin
+  if FIndent > 0 then
+  begin
+    RawChar(#10);
+    Raw(StringOfChar(' ', ADepth * FIndent));
+  end;
+end;
+
 procedure TJsonWriter.BeforeValue;
 begin
   if FNeedComma[FDepth] then
     RawChar(',');
+  if FDepth > 0 then
+    NewLine(FDepth);
   FNeedComma[FDepth] := True;
   if FHasPendingName then
   begin
     FHasPendingName := False;
     WriteQuoted(FPendingName);
     RawChar(':');
+    if FIndent > 0 then
+      RawChar(' ');
   end;
 end;
 
@@ -1676,9 +1697,14 @@ begin
 end;
 
 procedure TJsonWriter.EndObject;
+var
+  HadMembers: Boolean;
 begin
   FHasPendingName := False;
+  HadMembers := FNeedComma[FDepth];
   Pop;
+  if HadMembers then
+    NewLine(FDepth);
   RawChar('}');
 end;
 
@@ -1690,8 +1716,13 @@ begin
 end;
 
 procedure TJsonWriter.EndArray;
+var
+  HadElements: Boolean;
 begin
+  HadElements := FNeedComma[FDepth];
   Pop;
+  if HadElements then
+    NewLine(FDepth);
   RawChar(']');
 end;
 

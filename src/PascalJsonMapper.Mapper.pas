@@ -87,6 +87,7 @@ type
     FMappings: TDictionary<TGUID, TJsonMapping>;
     FConverters: array of IJsonConverter;
     FNaming: TJsonNaming;
+    FIndent: Integer;
     function FindConverter(ATypeInfo: PTypeInfo): IJsonConverter;
     function JsonName(const APropName: string): string;
     function CreateFromJson(ATypeInfo: PTypeInfo; AJson: TJsonValue;
@@ -112,6 +113,17 @@ type
 
     function FromJson<I: IInterface>(const AJson: string): I;
     function ToJson<I: IInterface>(const AValue: I): string;
+
+    // Any supported type at the top level: a dynamic array (of DTO
+    // interfaces, numbers, strings...), an interface, a scalar.
+    //   Json := Mapper.Serialize<TOrderArray>(Orders);
+    //   Orders := Mapper.Deserialize<TOrderArray>(Json);
+    // On FPC, name the array type (TOrderArray = TArray<IOrder>):
+    // Serialize<TArray<IOrder>> doesn't parse there (">>" reads as shr).
+    // Deserialize of JSON null gives Default(T). Class types can't be
+    // created: use PopulateObject.
+    function Serialize<T>(const AValue: T): string;
+    function Deserialize<T>(const AJson: string): T;
     function ObjectToJson(AObject: TObject): string;
     procedure PopulateObject(AObject: TObject; const AJson: string);
 
@@ -127,6 +139,9 @@ type
     procedure WriteObject(AWriter: TJsonWriter; AObject: TObject; const APath: string);
 
     property Naming: TJsonNaming read FNaming write FNaming;
+    // 0 (default): compact. N > 0: one member/element per line, N spaces
+    // per level (see TJsonWriter).
+    property Indent: Integer read FIndent write FIndent;
   end;
 
 // Helpers for converters and DTO code.
@@ -951,7 +966,7 @@ var
   Writer: TJsonWriter;
 begin
   TValue.Make(@AValue, TypeInfo(I), Value);
-  Writer := TJsonWriter.Create;
+  Writer := TJsonWriter.Create(FIndent);
   try
     if not WriteValue(Writer, Value, TypeInfo(I), '$') then
       Writer.WriteNull;
@@ -961,11 +976,45 @@ begin
   end;
 end;
 
+function TJsonMapper.Serialize<T>(const AValue: T): string;
+var
+  Value: TValue;
+  Writer: TJsonWriter;
+begin
+  TValue.Make(@AValue, TypeInfo(T), Value);
+  Writer := TJsonWriter.Create(FIndent);
+  try
+    if not WriteValue(Writer, Value, TypeInfo(T), '$') then
+      Writer.WriteNull;
+    Result := Writer.ToString;
+  finally
+    Writer.Free;
+  end;
+end;
+
+function TJsonMapper.Deserialize<T>(const AJson: string): T;
+var
+  Root: TJsonValue;
+  Value: TValue;
+begin
+  Result := Default(T);
+  Root := ParseJson(AJson);
+  try
+    if not ReadValue(Root, TypeInfo(T), '$', Value) then
+      Exit;
+  finally
+    Root.Free;
+  end;
+  // Result is zeroed (Default above), which is what ExtractRawData needs:
+  // FPC moves the data in and adds a reference, Delphi copies it.
+  Value.ExtractRawData(@Result);
+end;
+
 function TJsonMapper.ObjectToJson(AObject: TObject): string;
 var
   Writer: TJsonWriter;
 begin
-  Writer := TJsonWriter.Create;
+  Writer := TJsonWriter.Create(FIndent);
   try
     if AObject = nil then
       Writer.WriteNull

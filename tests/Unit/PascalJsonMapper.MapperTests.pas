@@ -101,6 +101,33 @@ type
   end;
 
   [TestFixture]
+  TMapperTopLevelTests = class
+  private
+    FMapper: TJsonMapper;
+  public
+    [Setup]
+    procedure SetUp;
+    [TearDown]
+    procedure TearDown;
+    [Test]
+    procedure Serialize_ArrayOfInterfaces;
+    [Test]
+    procedure Deserialize_ArrayOfInterfaces;
+    [Test]
+    procedure Deserialize_ArraysOfScalars;
+    [Test]
+    procedure Deserialize_Null_IsDefault;
+    [Test]
+    procedure Scalars_AtTopLevel;
+    [Test]
+    procedure Deserialize_Errors_HavePath;
+    [Test]
+    procedure Indent_MapperOutput;
+    [Test]
+    procedure Indent_RoundTrip;
+  end;
+
+  [TestFixture]
   TMapperConverterTests = class
   private
     FMapper: TJsonMapper;
@@ -585,6 +612,149 @@ begin
   end;
 end;
 
+{ TMapperTopLevelTests }
+
+procedure TMapperTopLevelTests.SetUp;
+begin
+  FMapper := NewTestMapper;
+end;
+
+procedure TMapperTopLevelTests.TearDown;
+begin
+  FreeAndNil(FMapper);
+end;
+
+function NewItem(ACode: Integer): IItem;
+var
+  Item: TItem;
+begin
+  Item := TItem.Create;
+  Item.Code := ACode;
+  Result := Item;
+end;
+
+procedure TMapperTopLevelTests.Serialize_ArrayOfInterfaces;
+var
+  Items: TItemArray;
+begin
+  SetLength(Items, 3);
+  Items[0] := NewItem(1);
+  Items[1] := NewItem(2);
+  TAssert.AssertEquals('[{"code":1},{"code":2},null]', FMapper.Serialize<TItemArray>(Items));
+  Items := nil;
+  TAssert.AssertEquals('[]', FMapper.Serialize<TItemArray>(Items));
+end;
+
+procedure TMapperTopLevelTests.Deserialize_ArrayOfInterfaces;
+var
+  Items: TItemArray;
+begin
+  Items := FMapper.Deserialize<TItemArray>('[{"code":5},null,{"code":-1}]');
+  TAssert.AssertEquals(3, Integer(Length(Items)));
+  TAssert.AssertEquals(5, Items[0].GetCode);
+  TAssert.AssertTrue(Items[1] = nil);
+  TAssert.AssertEquals(-1, Items[2].GetCode);
+end;
+
+procedure TMapperTopLevelTests.Deserialize_ArraysOfScalars;
+var
+  Ints: TIntArray;
+  Strs: TStrArray;
+begin
+  Ints := FMapper.Deserialize<TIntArray>('[1, 2, 3]');
+  TAssert.AssertEquals(3, Integer(Length(Ints)));
+  TAssert.AssertEquals(3, Ints[2]);
+  Strs := FMapper.Deserialize<TStrArray>('["a", "' + U([$E7]) + '"]');
+  TAssert.AssertEquals(2, Integer(Length(Strs)));
+  TAssert.AssertEquals(U([$E7]), Strs[1]);
+  TAssert.AssertEquals('["a","' + U([$E7]) + '"]', FMapper.Serialize<TStrArray>(Strs));
+end;
+
+procedure TMapperTopLevelTests.Deserialize_Null_IsDefault;
+var
+  Items: TItemArray;
+  Item: IItem;
+begin
+  Items := FMapper.Deserialize<TItemArray>('null');
+  TAssert.AssertEquals(0, Integer(Length(Items)));
+  Item := FMapper.Deserialize<IItem>('null');
+  TAssert.AssertTrue(Item = nil);
+  TAssert.AssertEquals(0, FMapper.Deserialize<Integer>('null'));
+end;
+
+procedure TMapperTopLevelTests.Scalars_AtTopLevel;
+var
+  Item: IItem;
+begin
+  TAssert.AssertEquals(42, FMapper.Deserialize<Integer>('42'));
+  TAssert.AssertEquals('x', FMapper.Deserialize<string>('"x"'));
+  TAssert.AssertEquals('5', FMapper.Serialize<Integer>(5));
+  TAssert.AssertEquals('"x"', FMapper.Serialize<string>('x'));
+  Item := FMapper.Deserialize<IItem>('{"code":9}');
+  TAssert.AssertEquals(9, Item.GetCode);
+  TAssert.AssertEquals('{"code":9}', FMapper.Serialize<IItem>(Item));
+end;
+
+procedure TMapperTopLevelTests.Deserialize_Errors_HavePath;
+var
+  Items: TItemArray;
+  Ints: TIntArray;
+begin
+  try
+    Items := FMapper.Deserialize<TItemArray>('[{"code":1},{"code":"x"}]');
+    TAssert.Fail('Must raise');
+  except
+    on E: EJsonMapperError do
+      TAssert.AssertTrue(E.Message, Pos('$[1].code:', E.Message) = 1);
+  end;
+  try
+    Ints := FMapper.Deserialize<TIntArray>('{"a":1}');
+    TAssert.Fail('An object for an array must raise');
+  except
+    on E: EJsonMapperError do
+      TAssert.AssertTrue(E.Message, Pos('$: expected array', E.Message) = 1);
+  end;
+end;
+
+procedure TMapperTopLevelTests.Indent_MapperOutput;
+var
+  O: TOrderDto;
+  Dto: IOrderDto;
+begin
+  O := TOrderDto.Create;
+  Dto := O;
+  O.Item := NewItem(7);
+  O.Numeros := TIntArray.Create(1, 2);
+  FMapper.Indent := 2;
+  TAssert.AssertEquals('{'#10 +
+    '  "item": {'#10 +
+    '    "code": 7'#10 +
+    '  },'#10 +
+    '  "itens": [],'#10 +
+    '  "numeros": ['#10 +
+    '    1,'#10 +
+    '    2'#10 +
+    '  ],'#10 +
+    '  "tags": []'#10 +
+    '}', FMapper.ToJson<IOrderDto>(Dto));
+end;
+
+procedure TMapperTopLevelTests.Indent_RoundTrip;
+const
+  Json = '[{"code":1},null,{"code":3}]';
+var
+  Items: TItemArray;
+  Pretty: string;
+begin
+  Items := FMapper.Deserialize<TItemArray>(Json);
+  FMapper.Indent := 3;
+  Pretty := FMapper.Serialize<TItemArray>(Items);
+  TAssert.AssertTrue(Pretty <> Json);
+  Items := FMapper.Deserialize<TItemArray>(Pretty);
+  FMapper.Indent := 0;
+  TAssert.AssertEquals(Json, FMapper.Serialize<TItemArray>(Items));
+end;
+
 { TMapperConverterTests }
 
 procedure TMapperConverterTests.SetUp;
@@ -682,6 +852,7 @@ end;
 initialization
   TDUnitX.RegisterTestFixture(TMapperReadTests);
   TDUnitX.RegisterTestFixture(TMapperWriteTests);
+  TDUnitX.RegisterTestFixture(TMapperTopLevelTests);
   TDUnitX.RegisterTestFixture(TMapperConverterTests);
   TDUnitX.RegisterTestFixture(TMapperRegistrationTests);
 

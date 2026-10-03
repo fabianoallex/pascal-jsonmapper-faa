@@ -33,13 +33,20 @@ Product := TJsonMapper.Shared.FromJson<IProduct>('{"name":"Rice","price":12.5}')
 Json := TJsonMapper.Shared.ToJson<IProduct>(Product);   // {"name":"Rice","price":12.5}
 ```
 
+Lists and other types at the top level go through `Serialize<T>` / `Deserialize<T>`, where `T` is any supported type: an array of DTO interfaces, an array of numbers, a scalar. On FPC, give the array type a name (`TProductArray = TArray<IProduct>`): `Serialize<TArray<IProduct>>` doesn't parse there, because `>>` reads as `shr`. `Indent := 2` makes the output indented.
+
+```pascal
+Products := TJsonMapper.Shared.Deserialize<TProductArray>('[{"name":"Rice"},{"name":"Beans"}]');
+Json := TJsonMapper.Shared.Serialize<TProductArray>(Products);
+```
+
 ## Samples
 
 [`samples/`](samples/README.md) has runnable console programs, one source file each for both compilers:
 
 | Sample | Shows |
 |---|---|
-| [01-basics](samples/01-basics/Basics.dpr) | DTO interfaces with nested arrays, `FromJson`/`ToJson`, `Naming`, `PopulateObject` on an existing object, errors with JSON path and position |
+| [01-basics](samples/01-basics/Basics.dpr) | DTO interfaces with nested arrays, `FromJson`/`ToJson`, `Naming`, `PopulateObject` on an existing object, errors with JSON path and position, a list at the top level, indented output |
 | [02-custom-converter](samples/02-custom-converter/CustomConverter.dpr) | `IJsonConverter`: a different format for a known type, a new type (a money value object), omitting a member |
 
 Optionals (absent / null / value, as in a PATCH) are shown with pascal-db-faa's types in its own [06-json](https://github.com/fabianoallex/pascal-db-faa/tree/main/samples/06-json) sample.

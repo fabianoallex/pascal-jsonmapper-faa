@@ -22,3 +22,18 @@ after:    {"name":"billing","workers":4,"database":{"host":"localhost","port":65
 EJsonMapperError: $.items[1].qty: expected integer, found JSON string
 EJsonMapperError: $.status: "osLost" is not a value of TOrderStatus
 EJsonParseError:  Member name expected (at position 29)
+
+== 6. A list at the top level, indented
+read 2 items; written back with Indent := 2:
+[
+  {
+    "sku": "RICE-5KG",
+    "qty": 2,
+    "price": 27.9
+  },
+  {
+    "sku": "SALT-1KG",
+    "qty": 1,
+    "price": 3.2
+  }
+]
