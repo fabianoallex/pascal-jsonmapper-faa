@@ -1,5 +1,7 @@
 # pascal-jsonmapper-faa
 
+[![FPC Linux tests](https://github.com/fabianoallex/pascal-jsonmapper-faa/actions/workflows/ci.yml/badge.svg)](https://github.com/fabianoallex/pascal-jsonmapper-faa/actions/workflows/ci.yml)
+
 JSON ⇄ object mapper for Object Pascal that compiles and behaves the same on **Delphi** and **Free Pascal / Lazarus** (FPC 3.2.2+, `{$MODE DELPHI}`).
 
 It extracts the idea of `Common.JsonMapper` from `delphi-api-infra-faa` (DTO interfaces, `RegisterMapping<I, C>`, `FromJson<I>`/`ToJson<I>`). It is not a drop-in replacement for that mapper.
@@ -75,6 +77,8 @@ On Linux, through Docker, the same suite builds with plain `fpc` from a read-onl
 sh tools/test_fpc_docker.sh             # FPC_IMAGE=<image with FPC 3.2.2>, default fpc322-bookworm
 sh tools/test_samples_docker.sh         # builds and runs the samples, diffs each output with its expected.txt
 ```
+
+CI (`.github/workflows/ci.yml`) runs `tools/ci-test.sh` on every push: both scripts above, on an FPC image built from Debian bookworm's `fpc` package. The Delphi side is checked in the IDE, since Delphi Community Edition can't build from the command line.
 
 On Delphi, open `PascalJsonMapper.groupproj` and run `PascalJsonMapper.UnitTests`. "Build All" only builds the active platform, so switch the target platform to build Win64. Every suite must end with 0 leaks.
 
