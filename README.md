@@ -89,7 +89,7 @@ CI (`.github/workflows/ci.yml`) runs `tools/ci-test.sh` on every push: both scri
 
 On Delphi, open `PascalJsonMapper.groupproj` and run `PascalJsonMapper.UnitTests`. "Build All" only builds the active platform, so switch the target platform to build Win64. Every suite must end with 0 leaks.
 
-Last verified: FPC 3.2.2 Win64 and x86_64-linux (10 runs, including 5 pinned to one CPU), and Delphi 12 CE Win32 and Win64. Each passed 76/76 with 0 leaks.
+Last verified: FPC 3.2.2 Win64 and x86_64-linux (10 runs, including 5 pinned to one CPU), and Delphi 12 CE Win32 and Win64. Each passed 86/86 with 0 leaks.
 
 ## License
 
