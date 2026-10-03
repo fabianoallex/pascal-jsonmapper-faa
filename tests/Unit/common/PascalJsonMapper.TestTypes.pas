@@ -61,6 +61,14 @@ type
     ['{92F4E5A6-D18C-4093-A4A7-9273B4C536E9}']
   end;
 
+  INamingDto = interface
+    ['{945A37B0-8B93-458F-A965-59230AA917B9}']
+  end;
+
+  ICollisionDto = interface
+    ['{94C6C477-32BD-4CB8-B7EA-574187B73664}']
+  end;
+
   TItemArray = array of IItem;
   TIntArray = array of Integer;
   TStrArray = array of string;
@@ -162,6 +170,38 @@ type
     property Spare: TAddress read FSpare write FSpare;
   end;
 
+  // Names that show what each Naming does, and Kind for the JSON member
+  // "type" (a Pascal keyword) through RenameMember.
+  TNamingDto = class(TInterfacedObject, INamingDto)
+  private
+    FUserID: Integer;
+    FHTTPStatus: Integer;
+    FCreatedAt: string;
+    FKind: string;
+  published
+    property UserID: Integer read FUserID write FUserID;
+    property HTTPStatus: Integer read FHTTPStatus write FHTTPStatus;
+    property CreatedAt: string read FCreatedAt write FCreatedAt;
+    property Kind: string read FKind write FKind;
+  end;
+
+  TNamingChildDto = class(TNamingDto)
+  private
+    FExtra: Integer;
+  published
+    property Extra: Integer read FExtra write FExtra;
+  end;
+
+  // Distinct in Pascal, the same JSON member under jnSnakeCase: user_id.
+  TCollisionDto = class(TInterfacedObject, ICollisionDto)
+  private
+    FUserId: Integer;
+    FUser_Id: Integer;
+  published
+    property UserId: Integer read FUserId write FUserId;
+    property User_Id: Integer read FUser_Id write FUser_Id;
+  end;
+
   TPatchDto = class(TInterfacedObject, IPatchDto)
   private
     FNome: string;
@@ -221,6 +261,8 @@ begin
   Result.RegisterMapping<IOrderDto, TOrderDto>;
   Result.RegisterMapping<IHasUnmappedDto, THasUnmappedDto>;
   Result.RegisterMapping<IPatchDto, TPatchDto>;
+  Result.RegisterMapping<INamingDto, TNamingDto>;
+  Result.RegisterMapping<ICollisionDto, TCollisionDto>;
   Result.RegisterConverter(TOptTextConverter.Create);
 end;
 

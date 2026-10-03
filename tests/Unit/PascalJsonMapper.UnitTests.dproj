@@ -123,6 +123,7 @@
         <DCCReference Include="PascalJsonMapper.MapperTests.pas"/>
         <DCCReference Include="PascalJsonMapper.ConcurrencyTests.pas"/>
         <DCCReference Include="PascalJsonMapper.BridgeTests.pas"/>
+        <DCCReference Include="PascalJsonMapper.NamingTests.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

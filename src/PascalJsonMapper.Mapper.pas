@@ -18,12 +18,16 @@
   - Anything else (optionals, value objects, custom formats) goes through a
     registered IJsonConverter, consulted before the built-in rules.
 
-  JSON names: written in camelCase by default (Naming); read
-  case-insensitively. Unknown JSON members are ignored; absent members leave
-  the property untouched.
+  JSON names: written in camelCase by default (Naming: also as declared or
+  snake_case; RenameMember for single members, e.g. a property Kind for the
+  member "type", a Pascal keyword); read case-insensitively. Unknown JSON
+  members are ignored by default (UnknownMembers := umError rejects them);
+  absent members leave the property untouched. Two properties that would
+  share a JSON name are an error, raised the first time the class is used.
 
-  Thread safety: register mappings and converters at startup; afterwards a
-  mapper can be used from any number of threads. Class metadata is cached
+  Thread safety: register mappings, converters and renames, and set the
+  options, at startup; afterwards a mapper can be used from any number of
+  threads. Class metadata is cached
   globally under a lock (FPC 3.2.2's TRttiInstanceType.GetProperties fills
   its own cache without one). }
 
@@ -75,7 +79,23 @@ type
     class function CreateInstance: TObject; override;
   end;
 
-  TJsonNaming = (jnCamelCase, jnAsDeclared);
+  // How a property name becomes a JSON member name (unless renamed):
+  //   jnCamelCase   CreatedAt -> createdAt (default)
+  //   jnAsDeclared  CreatedAt -> CreatedAt
+  //   jnSnakeCase   CreatedAt -> created_at, UserID -> user_id,
+  //                 HTTPStatus -> http_status (see JsonSnakeCase)
+  TJsonNaming = (jnCamelCase, jnAsDeclared, jnSnakeCase);
+
+  // What reading does with a JSON member no published property matches.
+  TJsonUnknownMembers = (umIgnore, umError);
+
+  // The JSON names of one class's properties under one mapper's settings,
+  // parallel to the class's property metadata.
+  TJsonClassNames = class
+  public
+    Names: array of string;
+    Renamed: array of Boolean;
+  end;
 
   TJsonMapping = record
     ImplClass: TClass;
@@ -88,8 +108,16 @@ type
     FConverters: array of IJsonConverter;
     FNaming: TJsonNaming;
     FIndent: Integer;
+    FUnknownMembers: TJsonUnknownMembers;
+    FRenames: TDictionary<string, string>;
+    FNames: TDictionary<TClass, TJsonClassNames>;
+    FNamesLock: TObject;
     function FindConverter(ATypeInfo: PTypeInfo): IJsonConverter;
-    function JsonName(const APropName: string): string;
+    function ApplyNaming(const APropName: string): string;
+    function ClassNames(AClass: TClass): TJsonClassNames;
+    function BuildClassNames(AClass: TClass): TJsonClassNames;
+    procedure ClearClassNames;
+    procedure SetNaming(AValue: TJsonNaming);
     function CreateFromJson(ATypeInfo: PTypeInfo; AJson: TJsonValue;
       const APath: string): IInterface;
     function DoReadValue(AJson: TJsonValue; ATypeInfo: PTypeInfo;
@@ -109,6 +137,12 @@ type
     procedure RegisterMapping<I: IInterface; C: class, constructor>;
     // Last registered wins when several converters accept a type.
     procedure RegisterConverter(const AConverter: IJsonConverter);
+    // The JSON member name for one published property of AClass (and of its
+    // descendants, unless one of them renames it again), used as is: Naming
+    // doesn't apply, and only that name (case-insensitively) matches when
+    // reading. For members whose name can't be a Pascal identifier (a
+    // keyword such as "type"), or that no Naming produces.
+    procedure RenameMember(AClass: TClass; const APropertyName, AJsonName: string);
     function FindImplClass(AInterface: PTypeInfo): TClass;
 
     function FromJson<I: IInterface>(const AJson: string): I;
@@ -138,7 +172,11 @@ type
     procedure ReadObject(AObject: TObject; AJson: TJsonValue; const APath: string);
     procedure WriteObject(AWriter: TJsonWriter; AObject: TObject; const APath: string);
 
-    property Naming: TJsonNaming read FNaming write FNaming;
+    property Naming: TJsonNaming read FNaming write SetNaming;
+    // umIgnore (default): JSON members that match no property are skipped.
+    // umError: they raise EJsonMapperError with their path, before anything
+    // is assigned (so PopulateObject leaves the object untouched).
+    property UnknownMembers: TJsonUnknownMembers read FUnknownMembers write FUnknownMembers;
     // 0 (default): compact. N > 0: one member/element per line, N spaces
     // per level (see TJsonWriter).
     property Indent: Integer read FIndent write FIndent;
@@ -146,6 +184,12 @@ type
 
 // Helpers for converters and DTO code.
 function JsonTypeName(ATypeInfo: PTypeInfo): string;
+// PascalCase -> snake_case: a '_' before an upper-case letter that follows a
+// lower-case letter or a digit, or that starts a word after an acronym
+// (HTTPStatus -> http_status); everything lower-cased. UserID -> user_id,
+// Address2 -> address2, Line2Text -> line2_text. An existing '_' is kept and
+// never doubled.
+function JsonSnakeCase(const AName: string): string;
 function JsonIsStringKind(AKind: TTypeKind): Boolean;
 function JsonIsBooleanType(ATypeInfo: PTypeInfo): Boolean;
 
@@ -163,6 +207,37 @@ begin
 {$ELSE}
   Result := GetTypeName(ATypeInfo);
 {$ENDIF}
+end;
+
+function IsUpper(C: Char): Boolean;
+begin
+  Result := (C >= 'A') and (C <= 'Z');
+end;
+
+function IsLowerOrDigit(C: Char): Boolean;
+begin
+  Result := ((C >= 'a') and (C <= 'z')) or ((C >= '0') and (C <= '9'));
+end;
+
+function JsonSnakeCase(const AName: string): string;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := '';
+  for I := 1 to Length(AName) do
+  begin
+    C := AName[I];
+    if IsUpper(C) and (I > 1) and (AName[I - 1] <> '_') and
+      (IsLowerOrDigit(AName[I - 1]) or
+       (IsUpper(AName[I - 1]) and (I < Length(AName)) and
+        (AName[I + 1] >= 'a') and (AName[I + 1] <= 'z'))) then
+      Result := Result + '_';
+    if IsUpper(C) then
+      Result := Result + Char(Ord(C) + 32)
+    else
+      Result := Result + C;
+  end;
 end;
 
 function PropInfoName(AProp: PPropInfo): string;
@@ -388,10 +463,17 @@ constructor TJsonMapper.Create;
 begin
   inherited Create;
   FMappings := TDictionary<TGUID, TJsonMapping>.Create;
+  FRenames := TDictionary<string, string>.Create;
+  FNames := TDictionary<TClass, TJsonClassNames>.Create;
+  FNamesLock := TCriticalSection.Create;
 end;
 
 destructor TJsonMapper.Destroy;
 begin
+  ClearClassNames;
+  FNames.Free;
+  FNamesLock.Free;
+  FRenames.Free;
   FConverters := nil;
   FMappings.Free;
   inherited;
@@ -451,12 +533,114 @@ begin
   Result := nil;
 end;
 
-function TJsonMapper.JsonName(const APropName: string): string;
+function TJsonMapper.ApplyNaming(const APropName: string): string;
 begin
-  if FNaming = jnCamelCase then
-    Result := LowerCase(Copy(APropName, 1, 1)) + Copy(APropName, 2, MaxInt)
+  case FNaming of
+    jnCamelCase: Result := LowerCase(Copy(APropName, 1, 1)) + Copy(APropName, 2, MaxInt);
+    jnSnakeCase: Result := JsonSnakeCase(APropName);
   else
     Result := APropName;
+  end;
+end;
+
+function RenameKey(AClass: TClass; const APropName: string): string;
+begin
+  Result := IntToHex(Int64(NativeUInt(AClass)), 16) + '.' + UpperCase(APropName);
+end;
+
+procedure TJsonMapper.SetNaming(AValue: TJsonNaming);
+begin
+  FNaming := AValue;
+  ClearClassNames;
+end;
+
+procedure TJsonMapper.ClearClassNames;
+var
+  Names: TJsonClassNames;
+begin
+  TCriticalSection(FNamesLock).Enter;
+  try
+    for Names in FNames.Values do
+      Names.Free;
+    FNames.Clear;
+  finally
+    TCriticalSection(FNamesLock).Leave;
+  end;
+end;
+
+procedure TJsonMapper.RenameMember(AClass: TClass; const APropertyName, AJsonName: string);
+var
+  Meta: TJsonClassMeta;
+  I: Integer;
+begin
+  if AJsonName = '' then
+    raise EJsonMapperError.Create('RenameMember: the JSON name is empty');
+  Meta := GMetaCache.Get(AClass);
+  for I := 0 to High(Meta.Props) do
+    if SameText(Meta.Props[I].Name, APropertyName) then
+    begin
+      FRenames.AddOrSetValue(RenameKey(AClass, Meta.Props[I].Name), AJsonName);
+      ClearClassNames;
+      Exit;
+    end;
+  raise EJsonMapperError.CreateFmt('RenameMember: %s has no published property "%s"',
+    [AClass.ClassName, APropertyName]);
+end;
+
+function TJsonMapper.BuildClassNames(AClass: TClass): TJsonClassNames;
+var
+  Meta: TJsonClassMeta;
+  I, J: Integer;
+  C: TClass;
+  Renamed: string;
+begin
+  Meta := GMetaCache.Get(AClass);
+  Result := TJsonClassNames.Create;
+  try
+    SetLength(Result.Names, Length(Meta.Props));
+    SetLength(Result.Renamed, Length(Meta.Props));
+    for I := 0 to High(Meta.Props) do
+    begin
+      // The most derived rename wins.
+      Result.Renamed[I] := False;
+      C := AClass;
+      while (C <> nil) and not Result.Renamed[I] do
+      begin
+        if FRenames.TryGetValue(RenameKey(C, Meta.Props[I].Name), Renamed) then
+        begin
+          Result.Names[I] := Renamed;
+          Result.Renamed[I] := True;
+        end;
+        C := C.ClassParent;
+      end;
+      if not Result.Renamed[I] then
+        Result.Names[I] := ApplyNaming(Meta.Props[I].Name);
+    end;
+    // Reading matches names case-insensitively, so compare that way.
+    for I := 0 to High(Result.Names) do
+      for J := I + 1 to High(Result.Names) do
+        if SameText(Result.Names[I], Result.Names[J]) then
+          raise EJsonMapperError.CreateFmt(
+            '%s: properties %s and %s both map to the JSON member "%s"',
+            [AClass.ClassName, Meta.Props[I].Name, Meta.Props[J].Name, Result.Names[J]]);
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
+function TJsonMapper.ClassNames(AClass: TClass): TJsonClassNames;
+begin
+  TCriticalSection(FNamesLock).Enter;
+  try
+    if not FNames.TryGetValue(AClass, Result) then
+    begin
+      Result := BuildClassNames(AClass);
+      FNames.Add(AClass, Result);
+    end;
+  finally
+    TCriticalSection(FNamesLock).Leave;
+  end;
 end;
 
 { Reading }
@@ -492,23 +676,48 @@ procedure TJsonMapper.ReadObject(AObject: TObject; AJson: TJsonValue;
   const APath: string);
 var
   Meta: TJsonClassMeta;
-  I: Integer;
+  Names: TJsonClassNames;
+  I, K: Integer;
   Member: TJsonValue;
   Value: TValue;
   Path: string;
   Child: TObject;
+  Known: Boolean;
 begin
   if AJson.Kind <> jkObject then
     Mismatch(APath, 'object', AJson);
   Meta := GMetaCache.Get(AObject.ClassType);
+  Names := ClassNames(AObject.ClassType);
+
+  // Before anything is assigned, so a rejected body changes nothing.
+  if FUnknownMembers = umError then
+    for K := 0 to AJson.Count - 1 do
+    begin
+      Known := False;
+      for I := 0 to High(Meta.Props) do
+        if SameText(AJson.Names[K], Names.Names[I]) or
+          (not Names.Renamed[I] and SameText(AJson.Names[K], Meta.Props[I].Name)) then
+        begin
+          Known := True;
+          Break;
+        end;
+      if not Known then
+        raise EJsonMapperError.CreateFmt('%s: unknown member (no published property of %s matches it)',
+          [MemberPath(APath, AJson.Names[K]), AObject.ClassName]);
+    end;
+
   for I := 0 to High(Meta.Props) do
   begin
-    Member := AJson.Find(JsonName(Meta.Props[I].Name));
+    // Exact name first, then case-insensitive; the declared property name
+    // too, unless the member was renamed.
+    Member := AJson.Find(Names.Names[I]);
     if Member = nil then
+      Member := AJson.Find(Names.Names[I], True);
+    if (Member = nil) and not Names.Renamed[I] then
       Member := AJson.Find(Meta.Props[I].Name, True);
     if Member = nil then
       Continue;
-    Path := MemberPath(APath, JsonName(Meta.Props[I].Name));
+    Path := MemberPath(APath, Names.Names[I]);
 
     if (Meta.Props[I].TypeInfo^.Kind = tkClass) and
       (FindConverter(Meta.Props[I].TypeInfo) = nil) then
@@ -791,16 +1000,18 @@ procedure TJsonMapper.WriteObject(AWriter: TJsonWriter; AObject: TObject;
   const APath: string);
 var
   Meta: TJsonClassMeta;
+  Names: TJsonClassNames;
   I: Integer;
   Name: string;
 begin
   Meta := GMetaCache.Get(AObject.ClassType);
+  Names := ClassNames(AObject.ClassType);
   AWriter.BeginObject;
   for I := 0 to High(Meta.Props) do
   begin
     if not Meta.Props[I].Readable then
       Continue;
-    Name := JsonName(Meta.Props[I].Name);
+    Name := Names.Names[I];
     AWriter.Name(Name);
     // An omitted value leaves the pending name unwritten.
     WriteValue(AWriter, Meta.Props[I].Prop.GetValue(AObject),

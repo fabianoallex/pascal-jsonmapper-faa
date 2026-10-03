@@ -24,7 +24,8 @@ uses
   PascalJsonMapper.JsonTests in 'PascalJsonMapper.JsonTests.pas',
   PascalJsonMapper.MapperTests in 'PascalJsonMapper.MapperTests.pas',
   PascalJsonMapper.ConcurrencyTests in 'PascalJsonMapper.ConcurrencyTests.pas',
-  PascalJsonMapper.BridgeTests in 'PascalJsonMapper.BridgeTests.pas';
+  PascalJsonMapper.BridgeTests in 'PascalJsonMapper.BridgeTests.pas',
+  PascalJsonMapper.NamingTests in 'PascalJsonMapper.NamingTests.pas';
 
 var
   runner: ITestRunner;

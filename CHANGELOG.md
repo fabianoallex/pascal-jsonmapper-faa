@@ -6,6 +6,21 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Added
+
+- `Naming := jnSnakeCase`: `CreatedAt` → `created_at`, `UserID` → `user_id`, `HTTPStatus` →
+  `http_status`, `Address2` → `address2`. The rule is `JsonSnakeCase`, which is public.
+- `TJsonMapper.RenameMember(AClass, 'Kind', 'type')`: one property's own JSON name, for members
+  that can't be Pascal identifiers (keywords) or that no `Naming` produces. Descendants inherit it,
+  and a descendant can rename the property again. Only the new name matches when reading. An unknown
+  property or an empty name raises.
+- `UnknownMembers := umError` (strict mode): a JSON member that matches no published property
+  raises `EJsonMapperError` with its path, before anything is assigned.
+- Two properties that would share a JSON name (compared case-insensitively, as reading does)
+  raise `EJsonMapperError` naming both, the first time the class is mapped.
+
+The defaults are unchanged: `jnCamelCase` and `umIgnore`.
+
 ## [0.1.0] - 2026-10-03
 
 First release: a JSON ⇄ object mapper that compiles and behaves the same on Delphi and Free
