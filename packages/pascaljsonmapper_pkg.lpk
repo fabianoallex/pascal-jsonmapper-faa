@@ -14,7 +14,7 @@
     </CompilerOptions>
     <Description Value="PascalJsonMapper shared library units."/>
     <License Value="MIT"/>
-    <Version Minor="1"/>
+    <Version Minor="2"/>
     <Files>
       <Item>
         <Filename Value="..\src\pjm.inc"/>

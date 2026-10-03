@@ -6,6 +6,8 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-03
+
 ### Added
 
 - `Naming := jnSnakeCase`: `CreatedAt` → `created_at`, `UserID` → `user_id`, `HTTPStatus` →
@@ -63,5 +65,6 @@ x86_64-linux and on Delphi 12 CE Win32 and Win64.
   round trips; Linux runs through Docker (`tools/test_fpc_docker.sh`,
   `tools/test_samples_docker.sh`); CI on every push (`tools/ci-test.sh`).
 
-[Unreleased]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/releases/tag/v0.1.0
