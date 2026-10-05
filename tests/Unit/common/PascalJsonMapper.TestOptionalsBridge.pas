@@ -1,7 +1,7 @@
 ﻿unit PascalJsonMapper.TestOptionalsBridge;
 
 { Bridge between the mapper and PascalJsonMapper.TestOptionals: the unit a
-  library that owns optional types (pascal-db-faa) would ship in a package
+  library that owns optional types (pascal-common-faa) ships in a package
   of its own, so that neither core depends on the other.
 
   One converter covers every optional interface (here 6: Opt/Null/OptNull x
@@ -15,8 +15,8 @@
 
   [1] IOptXxx has no Null state, but TOptNullXxx.Null assigned to one
   compiles (one class implements the three flavors); its Value would be a
-  made-up '' or 0, so it is written as null. Same rule as pascal-db-faa's
-  PascalDb.JsonMapper.Optionals, which this unit models.
+  made-up '' or 0, so it is written as null. Same rule as pascal-common-faa's
+  PascalCommon.JsonMapper.Optionals, which this unit models.
 
   A value is read and written by delegating to the mapper (ReadValue /
   WriteValue with the same path), so number/string rules and error paths are
@@ -197,7 +197,7 @@ begin
     Intf := AValue.AsInterface;
 
   // nil means "never set": absent for the Opt flavors, null for INullXxx
-  // (the same reading TOptionals.Safe gives it in pascal-db-faa).
+  // (the same reading TOptionals.Safe gives it in pascal-common-faa).
   Absent := (Intf = nil) or (Supports(Intf, IOptionalBase, Opt) and not Opt.HasValue);
   IsNull := (Intf = nil) or (Supports(Intf, INullableBase, Nul) and Nul.IsNull);
 

@@ -9,4 +9,4 @@ Console programs showing how to use pascal-jsonmapper-faa. Each sample is **one 
 
 Each folder has an `expected.txt` with the program's exact output. `tools/test_samples_docker.sh` builds the samples on Linux FPC with heaptrc and fails on any difference from it, a non-zero exit code or a leak. The output is the same on Windows, with FPC and with Delphi 12 (Win32 and Win64), apart from line endings.
 
-Optionals (absent / null / value, as in a PATCH body) are shown with real types in pascal-db-faa's [06-json](https://github.com/fabianoallex/pascal-db-faa/tree/main/samples/06-json), through its `PascalDb.JsonMapper.Optionals` bridge.
+Optionals (absent / null / value, as in a PATCH body) are shown with real types in pascal-db-faa's [06-json](https://github.com/fabianoallex/pascal-db-faa/tree/main/samples/06-json), through pascal-common-faa's `PascalCommon.JsonMapper.Optionals` bridge.

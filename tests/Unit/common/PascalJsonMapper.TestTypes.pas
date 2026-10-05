@@ -4,7 +4,7 @@
   mirrors. Framework-free, so the same file compiles in both suites.
 
   TOptTextConverter is the shape a "bridge" converter takes: the library
-  that owns a type (here, an optional modeled like PascalDb.Optionals'
+  that owns a type (here, an optional modeled like PascalCommon.Optionals'
   IOptString, derived from a generic interface) teaches the mapper its
   three states — absent (member omitted), null, value — without the mapper
   core knowing the type. }

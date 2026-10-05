@@ -6,9 +6,9 @@
   tests/Unit/PascalJsonMapper.BridgeTests.pas (DUnitX). Do not edit by hand: edit the DUnitX
   master and run the script again. }
 
-{ Tests for a converter shipped by another library, the way pascal-db-faa
-  would ship one for its optionals: PascalJsonMapper.TestOptionals plays the
-  library (same shape and GUIDs as PascalDb.Optionals, no mapper
+{ Tests for a converter shipped by another library, the way pascal-common-faa
+  ships one for its optionals: PascalJsonMapper.TestOptionals plays the
+  library (same shape and GUIDs as PascalCommon.Optionals, no mapper
   dependency) and PascalJsonMapper.TestOptionalsBridge the bridge unit,
   which registers itself on TJsonMapper.Shared at initialization. The DTO
   below registers itself on Shared the same way, so these tests go through
@@ -145,7 +145,7 @@ begin
   Dto := Read('{}');
   D := Dto as TBridgeDto;
   // Absent members never reach the converter: the DTO's own default
-  // (nil here; TOptionals.Safe in a pascal-db-faa DTO getter) stands.
+  // (nil here; TOptionals.Safe in a DTO getter over pascal-common-faa) stands.
   TAssert.AssertTrue(D.Apelido = nil);
   TAssert.AssertTrue(D.Telefone = nil);
   TAssert.AssertTrue(D.Obs = nil);

@@ -1,11 +1,11 @@
 ﻿unit PascalJsonMapper.TestOptionals;
 
 { Stand-in for another library's optional types, shaped like
-  PascalDb.Optionals (same interface names and GUIDs, same class layout,
+  PascalCommon.Optionals (same interface names and GUIDs, same class layout,
   minus the instance cache) for two value types: string and Integer.
 
   It knows nothing about the mapper: PascalJsonMapper.TestOptionalsBridge
-  is the bridge, the way a pascal-db-faa unit would be.
+  is the bridge, the way pascal-common-faa's own bridge unit is.
 
   Three interfaces per value type, one class implementing all three:
   - IOptXxx: "was it provided?" (HasValue). Absent or a value; no null.

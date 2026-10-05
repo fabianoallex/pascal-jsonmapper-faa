@@ -6,6 +6,18 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation only, no code or behavior change. The optionals bridge used as the worked
+  example moved from pascal-db-faa (`PascalDb.JsonMapper.Optionals`, package
+  `pascal_db_faa_jsonmapper`) to pascal-common-faa (`PascalCommon.JsonMapper.Optionals`, package
+  `pascal_common_faa_jsonmapper`, types in `PascalCommon.Optionals`, same interface names and
+  GUIDs). `docs/converters.md`, the READMEs and the test comments now point there, and the
+  "The real bridge" link no longer gives a 404. `docs/converters.md` adds the rule for projects
+  that use the bridge: its `.lpk` requires `pascaljsonmapper_pkg` by name only, so the project
+  lists its own copy of the mapper with `DefaultFilename` and `Prefer="True"` before the bridge,
+  or lazbuild silently uses the one registered in the IDE.
+
 ## [0.2.0] - 2026-10-03
 
 ### Added
