@@ -12,7 +12,8 @@
   new name matches, inherited by descendants, a descendant renaming again,
   bad arguments), two properties sharing a JSON name, and UnknownMembers :=
   umError (paths in nested objects and arrays, nothing assigned when a body
-  is rejected). The defaults stay camelCase and umIgnore.
+  is rejected), and Members (what documentation tools read). The defaults
+  stay camelCase and umIgnore.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
   PascalJsonMapper.DUnitXCompat). The mirror in tests/Unit/fpc is generated
@@ -50,6 +51,9 @@ type
     procedure Strict_NestedAndArrayPaths;
     procedure Strict_KnownVariants_Pass;
     procedure Strict_RejectedBody_ChangesNothing;
+    procedure Members_NamesTypesAndOrder;
+    procedure Members_FollowNamingAndRenames;
+    procedure Members_Collision_Raises;
   end;
 
 implementation
@@ -299,6 +303,49 @@ begin
     TAssert.AssertEquals('before', P.Name);
   finally
     P.Free;
+  end;
+end;
+
+procedure TNamingTests.Members_NamesTypesAndOrder;
+var
+  M: TJsonMemberArray;
+begin
+  // Ancestors first, then declaration order: what ToJson writes.
+  M := FMapper.Members(TNamingChildDto);
+  TAssert.AssertEquals(5, Length(M));
+  TAssert.AssertEquals('UserID', M[0].PropertyName);
+  TAssert.AssertEquals('userID', M[0].JsonName);
+  TAssert.AssertTrue('UserID is an Integer', M[0].TypeInfo = TypeInfo(Integer));
+  TAssert.AssertEquals('CreatedAt', M[2].PropertyName);
+  TAssert.AssertTrue('CreatedAt is a string', M[2].TypeInfo = TypeInfo(string));
+  TAssert.AssertEquals('Extra', M[4].PropertyName);
+  TAssert.AssertTrue(M[4].Readable and M[4].Writable);
+end;
+
+procedure TNamingTests.Members_FollowNamingAndRenames;
+var
+  M: TJsonMemberArray;
+begin
+  FMapper.Naming := jnSnakeCase;
+  FMapper.RenameMember(TNamingDto, 'Kind', 'type');
+  M := FMapper.Members(TNamingDto);
+  TAssert.AssertEquals('user_id', M[0].JsonName);
+  TAssert.AssertEquals('http_status', M[1].JsonName);
+  TAssert.AssertEquals('type', M[3].JsonName);
+  // The same names ToJson uses.
+  TAssert.AssertEquals('{"user_id":7,"http_status":404,"created_at":"today","type":"admin"}',
+    FMapper.ToJson<INamingDto>(NewNaming));
+end;
+
+procedure TNamingTests.Members_Collision_Raises;
+begin
+  FMapper.Naming := jnSnakeCase;
+  try
+    FMapper.Members(TCollisionDto);
+    TAssert.Fail('A collision must raise');
+  except
+    on E: EJsonMapperError do
+      TAssert.AssertTrue(E.Message, Pos('"user_id"', E.Message) > 0);
   end;
 end;
 

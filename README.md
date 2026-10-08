@@ -6,7 +6,7 @@ JSON ⇄ object mapper for Object Pascal that compiles and behaves the same on *
 
 It extracts the idea of `Common.JsonMapper` from `delphi-api-infra-faa` (DTO interfaces, `RegisterMapping<I, C>`, `FromJson<I>`/`ToJson<I>`). It is not a drop-in replacement for that mapper.
 
-Current version: **0.2.1**. While it is 0.x the API may still change between minor versions; every change is listed in the [changelog](CHANGELOG.md).
+Current version: **0.3.0**. While it is 0.x the API may still change between minor versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Usage
 
@@ -61,6 +61,7 @@ Optionals (absent / null / value, as in a PATCH) are shown in pascal-db-faa's [0
 - **Unknown members** are ignored by default. With `UnknownMembers := umError`, they raise `EJsonMapperError` with their path (`$.nmae: unknown member ...`) before anything is assigned, so a rejected body changes nothing, even through `PopulateObject`.
 - **Types**: strings, chars, all integer sizes (range-checked), `Int64`, `Single`/`Double`/`Extended`/`Currency`, `Boolean`, enums (by name), `TDateTime`/`TDate`/`TTime` (ISO 8601, no zone written; an offset on input converts to UTC), interfaces, dynamic arrays, objects. Anything else raises `EJsonMapperError` with the JSON path (`$.items[1].code`). The fix for an unsupported type is a converter.
 - **Converters** (`IJsonConverter`) run before the built-in rules, and the last registered wins. A converter can omit a member by writing nothing, which is how a bridge for optional types encodes *absent / null / value*. The library that owns a type should ship its converter in a separate unit or package, so neither core depends on the other. See [docs/converters.md](docs/converters.md) for how to write one, with pascal-common-faa's optionals as the worked example.
+- **Describing the JSON**: `Members(TClass)` lists a class's members as the mapper writes them: property name, JSON name (Naming and renames applied) and type, in order. For documentation and schema generators, so they can't drift from the wire format.
 - **Threads**: register at startup, then use from any thread. Class metadata is cached under a lock.
 - **FPC strings** are treated as UTF-8 (the Lazarus convention). Delphi strings are UTF-16.
 

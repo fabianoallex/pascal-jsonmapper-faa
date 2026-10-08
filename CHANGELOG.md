@@ -6,6 +6,17 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
+### Added
+
+- `TJsonMapper.Members(AClass)`: the JSON members of a class's published properties, in the order
+  the mapper writes them, each with its property name, JSON name (`Naming` and `RenameMember`
+  applied), type and whether it is read and written (`TJsonMember`, `TJsonMemberArray`). For code
+  that describes the JSON instead of producing it; pascal-api-infra-faa's OpenAPI generator uses
+  it so the documented names are the ones on the wire. Raises on a name collision, as reading
+  and writing do.
+
 ## [0.2.1] - 2026-10-05
 
 ### Changed

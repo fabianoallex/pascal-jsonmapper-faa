@@ -42,6 +42,17 @@ type
 
   TJsonMapper = class;
 
+  { One JSON member of a class, as the mapper reads and writes it (see
+    TJsonMapper.Members). }
+  TJsonMember = record
+    PropertyName: string;   // the published property, as declared
+    JsonName: string;       // its member name in JSON: Naming and RenameMember applied
+    TypeInfo: PTypeInfo;    // the property's type
+    Readable: Boolean;      // written by ToJson/WriteObject
+    Writable: Boolean;      // filled by FromJson/ReadObject
+  end;
+  TJsonMemberArray = array of TJsonMember;
+
   { Extension point for types the built-in rules don't cover. The owner of a
     type ships its converter (e.g. a bridge unit in the library that defines
     the type), so neither library depends on the other's core. }
@@ -144,6 +155,13 @@ type
     // keyword such as "type"), or that no Naming produces.
     procedure RenameMember(AClass: TClass; const APropertyName, AJsonName: string);
     function FindImplClass(AInterface: PTypeInfo): TClass;
+    // The JSON members of AClass's published properties, in the order the
+    // mapper writes them and with the names it uses (Naming and RenameMember
+    // applied, so a later change of either shows here too). For code that
+    // describes the JSON instead of producing it: documentation, schemas.
+    // Raises EJsonMapperError when two properties map to the same name, as
+    // reading or writing would.
+    function Members(AClass: TClass): TJsonMemberArray;
 
     function FromJson<I: IInterface>(const AJson: string): I;
     function ToJson<I: IInterface>(const AValue: I): string;
@@ -640,6 +658,26 @@ begin
     end;
   finally
     TCriticalSection(FNamesLock).Leave;
+  end;
+end;
+
+function TJsonMapper.Members(AClass: TClass): TJsonMemberArray;
+var
+  Meta: TJsonClassMeta;
+  Names: TJsonClassNames;
+  I: Integer;
+begin
+  Meta := GMetaCache.Get(AClass);
+  Names := ClassNames(AClass);
+  Result := nil;
+  SetLength(Result, Length(Meta.Props));
+  for I := 0 to High(Meta.Props) do
+  begin
+    Result[I].PropertyName := Meta.Props[I].Name;
+    Result[I].JsonName := Names.Names[I];
+    Result[I].TypeInfo := Meta.Props[I].TypeInfo;
+    Result[I].Readable := Meta.Props[I].Readable;
+    Result[I].Writable := Meta.Props[I].Writable;
   end;
 end;
 
