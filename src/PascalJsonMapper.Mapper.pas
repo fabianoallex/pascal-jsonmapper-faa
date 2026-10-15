@@ -40,7 +40,28 @@ uses
   PascalJsonMapper.Json;
 
 type
+  // A plain EJsonMapperError is a setup or programming error: a type without
+  // converter, an unregistered interface, a nil class property, two
+  // properties sharing a JSON name, a bad RenameMember. Its message names
+  // Pascal classes, properties and types.
   EJsonMapperError = class(Exception);
+
+  { The JSON being read is wrong, not the DTO: an unknown or duplicate
+    member, a JSON type that doesn't fit, a number out of range, a bad
+    date, a converter (EJsonError) rejecting the value. The message is the
+    JSON path and the reason in JSON terms only ('$.qty: unknown member'),
+    fit to return to whoever sent the JSON; Detail has the Pascal side
+    (class, property, type) for logs, or '' when there is none.
+    EJsonParseError (invalid JSON text) is not one: it is an EJsonError. }
+  EJsonInputError = class(EJsonMapperError)
+  private
+    FPath: string;
+    FDetail: string;
+  public
+    constructor CreateInput(const APath, AReason: string; const ADetail: string = '');
+    property Path: string read FPath;
+    property Detail: string read FDetail;
+  end;
 
   TJsonMapper = class;
 
@@ -218,6 +239,15 @@ implementation
 uses
   Classes, SyncObjs;
 
+{ EJsonInputError }
+
+constructor EJsonInputError.CreateInput(const APath, AReason, ADetail: string);
+begin
+  inherited Create(APath + ': ' + AReason);
+  FPath := APath;
+  FDetail := ADetail;
+end;
+
 { Helpers }
 
 function JsonTypeName(ATypeInfo: PTypeInfo): string;
@@ -314,8 +344,8 @@ const
 
 procedure Mismatch(const APath, AExpected: string; AJson: TJsonValue);
 begin
-  raise EJsonMapperError.CreateFmt('%s: expected %s, found JSON %s',
-    [APath, AExpected, JsonKindNames[AJson.Kind]]);
+  raise EJsonInputError.CreateInput(APath,
+    Format('expected %s, found JSON %s', [AExpected, JsonKindNames[AJson.Kind]]));
 end;
 
 procedure Unsupported(const APath: string; ATypeInfo: PTypeInfo);
@@ -754,14 +784,14 @@ begin
     if I > High(Meta.Props) then
     begin
       if FUnknownMembers = umError then
-        raise EJsonMapperError.CreateFmt('%s: unknown member (no published property of %s matches it)',
-          [MemberPath(APath, AJson.Names[K]), AObject.ClassName]);
+        raise EJsonInputError.CreateInput(MemberPath(APath, AJson.Names[K]), 'unknown member',
+          Format('no published property of %s matches it', [AObject.ClassName]));
       Continue;
     end;
     if MemberOf[I] >= 0 then
-      raise EJsonMapperError.CreateFmt('%s: duplicate member ("%s" and "%s" both match property %s.%s)',
-        [MemberPath(APath, Names.Names[I]), AJson.Names[MemberOf[I]], AJson.Names[K],
-         AObject.ClassName, Meta.Props[I].Name]);
+      raise EJsonInputError.CreateInput(MemberPath(APath, Names.Names[I]),
+        Format('duplicate member ("%s" and "%s")', [AJson.Names[MemberOf[I]], AJson.Names[K]]),
+        Format('both match property %s.%s', [AObject.ClassName, Meta.Props[I].Name]));
     MemberOf[I] := K;
   end;
 
@@ -799,10 +829,11 @@ begin
   try
     Result := DoReadValue(AJson, ATypeInfo, APath, AValue);
   except
-    // From a converter or a TJsonValue accessor: add where it happened.
-    // EJsonMapperError is not an EJsonError, so outer levels pass it on.
+    // From a converter or a TJsonValue accessor: the value doesn't fit; add
+    // where it happened. EJsonMapperError is not an EJsonError, so outer
+    // levels pass it on.
     on E: EJsonError do
-      raise EJsonMapperError.CreateFmt('%s: %s', [APath, E.Message]);
+      raise EJsonInputError.CreateInput(APath, E.Message);
   end;
 end;
 
@@ -880,8 +911,9 @@ begin
             Mismatch(APath, 'string (enumeration name)', AJson);
           Ord := GetEnumValue(ATypeInfo, AJson.AsString);
           if Ord < 0 then
-            raise EJsonMapperError.CreateFmt('%s: "%s" is not a value of %s',
-              [APath, AJson.AsString, JsonTypeName(ATypeInfo)]);
+            raise EJsonInputError.CreateInput(APath,
+              Format('"%s" is not an accepted value', [AJson.AsString]),
+              Format('not a value of %s', [JsonTypeName(ATypeInfo)]));
         end
         else
         begin
@@ -889,8 +921,9 @@ begin
             Mismatch(APath, 'integer', AJson);
           OrdinalRange(ATypeInfo, Min, Max);
           if (Ord < Min) or (Ord > Max) then
-            raise EJsonMapperError.CreateFmt('%s: %d is out of range for %s',
-              [APath, Ord, JsonTypeName(ATypeInfo)]);
+            raise EJsonInputError.CreateInput(APath,
+              Format('%d is out of range (%d..%d)', [Ord, Min, Max]),
+              Format('type %s', [JsonTypeName(ATypeInfo)]));
         end;
         TValue.Make(@Ord, ATypeInfo, AValue);
       end;
@@ -915,7 +948,7 @@ begin
             Dt := JsonStrToDateTime(AJson.AsString);
         except
           on E: EJsonError do
-            raise EJsonMapperError.CreateFmt('%s: %s', [APath, E.Message]);
+            raise EJsonInputError.CreateInput(APath, E.Message);
         end;
         TValue.Make(@Dt, ATypeInfo, AValue);
       end
@@ -944,7 +977,15 @@ begin
           ftCurr:
             begin
               if not TryStrToCurr(AJson.NumberText, Cur, JsonFormatSettings) then
-                Cur := JsonStrToDouble(AJson.NumberText);
+              begin
+                // Assigning a Double beyond Currency's range raises
+                // EInvalidOp, without a path.
+                Dbl := JsonStrToDouble(AJson.NumberText);
+                if (Dbl >= 922337203685477.5807) or (Dbl <= -922337203685477.5808) then
+                  raise EJsonInputError.CreateInput(APath,
+                    Format('Number %s is out of range', [AJson.NumberText]), 'type Currency');
+                Cur := Dbl;
+              end;
               TValue.Make(@Cur, ATypeInfo, AValue);
             end;
         else
@@ -962,11 +1003,11 @@ begin
           {$IFDEF FPC}
           U := UTF8Decode(S);
           if Length(U) <> 1 then
-            raise EJsonMapperError.CreateFmt('%s: one character expected', [APath]);
+            raise EJsonInputError.CreateInput(APath, 'one character expected');
           TValue.Make(@U[1], ATypeInfo, AValue);
           {$ELSE}
           if Length(S) <> 1 then
-            raise EJsonMapperError.CreateFmt('%s: one character expected', [APath]);
+            raise EJsonInputError.CreateInput(APath, 'one character expected');
           C := S[1];
           TValue.Make(@C, ATypeInfo, AValue);
           {$ENDIF}
@@ -974,7 +1015,7 @@ begin
         else
         begin
           if Length(S) <> 1 then
-            raise EJsonMapperError.CreateFmt('%s: one character expected', [APath]);
+            raise EJsonInputError.CreateInput(APath, 'one character expected');
           {$IFDEF FPC}
           C := S[1];
           TValue.Make(@C, ATypeInfo, AValue);

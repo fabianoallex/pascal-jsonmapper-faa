@@ -15,7 +15,8 @@
     gets the mapper's own ISO 8601 text.
 
   Errors raised inside a converter (EJsonError, or a TJsonValue accessor
-  used on the wrong kind) come out as EJsonMapperError with the JSON path.
+  used on the wrong kind) come out with the JSON path, as EJsonInputError
+  (an EJsonMapperError) while reading.
 
   The converters are registered on a mapper of their own here; a library
   that ships converters for its types registers them on TJsonMapper.Shared

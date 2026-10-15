@@ -6,6 +6,41 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-15
+
+### Added
+
+- `EJsonInputError = class(EJsonMapperError)`: raised when the JSON being read is at fault. That
+  covers an unknown member (umError), a duplicate member, a JSON type that doesn't fit, an
+  integer out of its type's range, a name that is no value of the enum, a number beyond Double or
+  Currency, a bad ISO 8601 date, and an `EJsonError` raised by a converter while reading. `Path` holds the JSON path. `Detail` holds the Pascal side
+  (class, property, type) for logs, or `''`. The message has JSON terms only, so an API can
+  return it to the client. Setup and programming errors (type without converter, unregistered
+  interface, nil class property, two properties sharing a JSON name, writing NaN) stay plain
+  `EJsonMapperError`, even when their message starts with a path. `EJsonParseError` is
+  unchanged.
+
+### Changed
+
+- **Messages changed**: four reading errors no longer name Pascal classes, properties or types.
+  That detail moved to `Detail`:
+  - `$.qty: unknown member (no published property of TOrder matches it)` → `$.qty: unknown
+    member`
+  - `$.name: duplicate member ("name" and "NAME" both match property TOrder.Name)` → `$.name:
+    duplicate member ("name" and "NAME")`
+  - `$.cor: "cBlue" is not a value of TColor3` → `$.cor: "cBlue" is not an accepted value`
+  - `$.b: 300 is out of range for Byte` → `$.b: 300 is out of range (0..255)`
+
+  The other messages keep their text; only their class is now `EJsonInputError` where the JSON
+  is at fault.
+- `docs/converters.md`: an `EJsonError` a converter raises while reading becomes
+  `EJsonInputError`, so its message should not name Pascal types either.
+
+### Fixed
+
+- A number beyond Currency's range (`{"valor":1e300}`) raised `EInvalidOp` without a path. It
+  now raises `EJsonInputError`: `$.valor: Number 1e300 is out of range`.
+
 ## [0.4.0] - 2026-10-15
 
 ### Changed
@@ -116,7 +151,8 @@ x86_64-linux and on Delphi 12 CE Win32 and Win64.
   round trips; Linux runs through Docker (`tools/test_fpc_docker.sh`,
   `tools/test_samples_docker.sh`); CI on every push (`tools/ci-test.sh`).
 
-[Unreleased]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.2.0...v0.2.1

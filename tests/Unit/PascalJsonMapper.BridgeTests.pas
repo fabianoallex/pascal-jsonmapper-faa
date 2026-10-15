@@ -106,7 +106,8 @@ begin
     Dto := TJsonMapper.Shared.FromJson<IBridgeDto>(AJson);
     TAssert.Fail('Must raise: ' + AJson);
   except
-    on E: EJsonMapperError do
+    // The bridge's EJsonError, read: the JSON's fault.
+    on E: EJsonInputError do
       TAssert.AssertTrue('Message "' + E.Message + '" must start with "' +
         AExpectedPath + ':"', Pos(AExpectedPath + ':', E.Message) = 1);
   end;

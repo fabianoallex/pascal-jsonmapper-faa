@@ -307,15 +307,27 @@ begin
     Order := TJsonMapper.Shared.FromJson<IOrder>(
       '{"id": 1, "items": [{"sku": "A", "qty": 1}, {"sku": "B", "qty": "two"}]}');
   except
-    on E: EJsonMapperError do
-      Writeln('EJsonMapperError: ', E.Message);
+    // The JSON is wrong (not the DTO): the message is fit for the client,
+    // Detail (Pascal names) for the log.
+    on E: EJsonInputError do
+    begin
+      Writeln('EJsonInputError: ', E.Message);
+      if E.Detail <> '' then
+        Writeln('  detail: ', E.Detail);
+    end;
   end;
   try
     Order := TJsonMapper.Shared.FromJson<IOrder>(
       '{"id": 1, "status": "osLost"}');
   except
-    on E: EJsonMapperError do
-      Writeln('EJsonMapperError: ', E.Message);
+    // The JSON is wrong (not the DTO): the message is fit for the client,
+    // Detail (Pascal names) for the log.
+    on E: EJsonInputError do
+    begin
+      Writeln('EJsonInputError: ', E.Message);
+      if E.Detail <> '' then
+        Writeln('  detail: ', E.Detail);
+    end;
   end;
   try
     Order := TJsonMapper.Shared.FromJson<IOrder>('{"id": 1, "customer": "Ana",}');

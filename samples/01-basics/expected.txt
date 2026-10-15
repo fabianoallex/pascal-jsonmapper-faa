@@ -19,8 +19,9 @@ defaults: {"name":"unnamed","workers":4,"database":{"host":"localhost","port":54
 after:    {"name":"billing","workers":4,"database":{"host":"localhost","port":6543}}
 
 == 5. Bad input
-EJsonMapperError: $.items[1].qty: expected integer, found JSON string
-EJsonMapperError: $.status: "osLost" is not a value of TOrderStatus
+EJsonInputError: $.items[1].qty: expected integer, found JSON string
+EJsonInputError: $.status: "osLost" is not an accepted value
+  detail: not a value of TOrderStatus
 EJsonParseError:  Member name expected (at position 29)
 
 == 6. A list at the top level, indented

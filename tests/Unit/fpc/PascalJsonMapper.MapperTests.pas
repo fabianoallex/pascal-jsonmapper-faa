@@ -56,6 +56,9 @@ type
     procedure Error_InvalidJson;
     procedure Error_InsideConverter_HasPath;
     procedure Error_NumberOutOfRange_HasPath;
+    procedure Error_CurrencyOutOfRange_HasPath;
+    procedure Error_IsoDate_HasPath;
+    procedure Error_UnsupportedType_IsNotInputError;
     procedure ClassProperty_PopulatedInPlace;
     procedure ClassProperty_Nil_Raises;
   end;
@@ -118,6 +121,11 @@ uses
   TypInfo, Rtti;
 
 type
+  // No built-in rule reads a record: Unsupported, a setup error.
+  TPlainRecord = record
+    A: Integer;
+  end;
+
   // Writes every IOptText as a constant: registered after TOptTextConverter,
   // it must take precedence.
   TConstantConverter = class(TInterfacedObject, IJsonConverter)
@@ -186,7 +194,7 @@ begin
     Dto := FMapper.FromJson<IOrderDto>(AJson);
     TAssert.Fail('Must raise: ' + AJson);
   except
-    on E: EJsonMapperError do
+    on E: EJsonInputError do
       TAssert.AssertTrue('Message "' + E.Message + '" must contain "' +
         AExpectedInMessage + '"', Pos(AExpectedInMessage, E.Message) > 0);
   end;
@@ -319,15 +327,21 @@ begin
     Dto := FMapper.FromJson<IScalarDto>('{"pequeno":256}');
     TAssert.Fail('256 into a Byte must raise');
   except
-    on E: EJsonMapperError do
-      TAssert.AssertTrue(E.Message, Pos('out of range', E.Message) > 0);
+    on E: EJsonInputError do
+    begin
+      TAssert.AssertEquals('$.pequeno: 256 is out of range (0..255)', E.Message);
+      TAssert.AssertEquals('$.pequeno', E.Path);
+      TAssert.AssertEquals('type Byte', E.Detail);
+    end;
   end;
   try
     Dto := FMapper.FromJson<IScalarDto>('{"idade":2147483648}');
     TAssert.Fail('2^31 into an Integer must raise');
   except
-    on E: EJsonMapperError do
-      TAssert.AssertTrue(E.Message, Pos('out of range', E.Message) > 0);
+    // Detail is "type Integer" on Delphi, "type LongInt" on FPC.
+    on E: EJsonInputError do
+      TAssert.AssertEquals('$.idade: 2147483648 is out of range (-2147483648..2147483647)',
+        E.Message);
   end;
   try
     Dto := FMapper.FromJson<IScalarDto>('{"idade":1.5}');
@@ -346,8 +360,11 @@ begin
     Dto := FMapper.FromJson<IScalarDto>('{"cor":"clPink"}');
     TAssert.Fail('Unknown enum name must raise');
   except
-    on E: EJsonMapperError do
-      TAssert.AssertTrue(E.Message, Pos('clPink', E.Message) > 0);
+    on E: EJsonInputError do
+    begin
+      TAssert.AssertEquals('$.cor: "clPink" is not an accepted value', E.Message);
+      TAssert.AssertEquals('not a value of TColor3', E.Detail);
+    end;
   end;
 end;
 
@@ -359,8 +376,12 @@ begin
     Dto := FMapper.FromJson<IHasUnmappedDto>('{"other":{}}');
     TAssert.Fail('Unregistered interface must raise');
   except
+    // A setup error, not the JSON's fault.
     on E: EJsonMapperError do
+    begin
+      TAssert.AssertFalse(E.Message, E is EJsonInputError);
       TAssert.AssertTrue(E.Message, Pos('IUnmapped', E.Message) > 0);
+    end;
   end;
 end;
 
@@ -387,8 +408,12 @@ begin
     Dto := FMapper.FromJson<IPatchDto>('{"apelido":5}');
     TAssert.Fail('A number for IOptText must raise');
   except
-    on E: EJsonMapperError do
-      TAssert.AssertTrue(E.Message, Pos('$.apelido:', E.Message) = 1);
+    on E: EJsonInputError do
+    begin
+      TAssert.AssertTrue(E.Message, Pos('$.apelido: ', E.Message) = 1);
+      TAssert.AssertEquals('$.apelido', E.Path);
+      TAssert.AssertEquals('', E.Detail);
+    end;
   end;
 end;
 
@@ -400,8 +425,75 @@ begin
     Dto := FMapper.FromJson<IScalarDto>('{"preco":1e309}');
     TAssert.Fail('1e309 into a Double must raise');
   except
+    on E: EJsonInputError do
+      TAssert.AssertEquals('$.preco: Number 1e309 is out of range', E.Message);
+  end;
+end;
+
+procedure TMapperReadTests.Error_CurrencyOutOfRange_HasPath;
+var
+  Dto: IScalarDto;
+  Cur: Currency;
+begin
+  // In 0.4.0, 1e300 raised EInvalidOp, without a path.
+  try
+    Dto := FMapper.FromJson<IScalarDto>('{"valor":1e300}');
+    TAssert.Fail('1e300 into a Currency must raise');
+  except
+    on E: EJsonInputError do
+    begin
+      TAssert.AssertEquals('$.valor: Number 1e300 is out of range', E.Message);
+      TAssert.AssertEquals('type Currency', E.Detail);
+    end;
+  end;
+  try
+    Dto := FMapper.FromJson<IScalarDto>('{"valor":-1e15}');
+    TAssert.Fail('-1e15 into a Currency must raise');
+  except
+    on E: EJsonInputError do
+      TAssert.AssertEquals('$.valor: Number -1e15 is out of range', E.Message);
+  end;
+  // Large values within range, and an exponent. (Kept below 2^53/10000:
+  // on FPC 3.2.2 TRttiProperty.SetValue stores Currency through Double, so
+  // larger values lose their last digits and the top of the range raises
+  // EInvalidOp. That was so before 0.5.0 too.)
+  Dto := FMapper.FromJson<IScalarDto>('{"valor":900000000000.1234}');
+  Cur := Scalar(Dto).Valor;
+  TAssert.AssertEquals(Int64(9000000000001234), PInt64(@Cur)^);
+  Dto := FMapper.FromJson<IScalarDto>('{"valor":-900000000000.1234}');
+  Cur := Scalar(Dto).Valor;
+  TAssert.AssertEquals(Int64(-9000000000001234), PInt64(@Cur)^);
+  Dto := FMapper.FromJson<IScalarDto>('{"valor":1.5e3}');
+  Cur := Scalar(Dto).Valor;
+  TAssert.AssertEquals(Int64(15000000), PInt64(@Cur)^);
+end;
+
+procedure TMapperReadTests.Error_IsoDate_HasPath;
+var
+  Dto: IScalarDto;
+begin
+  try
+    Dto := FMapper.FromJson<IScalarDto>('{"nascimento":"2026-13-01"}');
+    TAssert.Fail('Month 13 must raise');
+  except
+    on E: EJsonInputError do
+      TAssert.AssertEquals('$.nascimento: Invalid ISO 8601 date/time: "2026-13-01"', E.Message);
+  end;
+end;
+
+procedure TMapperReadTests.Error_UnsupportedType_IsNotInputError;
+var
+  R: TPlainRecord;
+begin
+  try
+    R := FMapper.Deserialize<TPlainRecord>('{}');
+    TAssert.Fail('A record must raise');
+  except
     on E: EJsonMapperError do
-      TAssert.AssertTrue(E.Message, Pos('$.preco:', E.Message) = 1);
+    begin
+      TAssert.AssertFalse(E.Message, E is EJsonInputError);
+      TAssert.AssertTrue(E.Message, Pos('is not supported', E.Message) > 0);
+    end;
   end;
 end;
 
@@ -433,8 +525,12 @@ begin
       FMapper.PopulateObject(P, '{"spare":{"street":"x"}}');
       TAssert.Fail('A nil class property must raise');
     except
+      // The DTO's fault (its constructor), not the JSON's.
       on E: EJsonMapperError do
+      begin
+        TAssert.AssertFalse(E.Message, E is EJsonInputError);
         TAssert.AssertTrue(E.Message, Pos('$.spare', E.Message) > 0);
+      end;
     end;
   finally
     P.Free;
@@ -564,8 +660,12 @@ begin
     FMapper.ToJson<IScalarDto>(Dto);
     TAssert.Fail('NaN must raise');
   except
+    // Writing: the value came from the program, not from a JSON text.
     on E: EJsonMapperError do
+    begin
+      TAssert.AssertFalse(E.Message, E is EJsonInputError);
       TAssert.AssertTrue(E.Message, Pos('$.preco:', E.Message) = 1);
+    end;
   end;
 end;
 
