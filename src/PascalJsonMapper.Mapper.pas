@@ -22,7 +22,9 @@
   snake_case; RenameMember for single members, e.g. a property Kind for the
   member "type", a Pascal keyword); read case-insensitively. Unknown JSON
   members are ignored by default (UnknownMembers := umError rejects them);
-  absent members leave the property untouched. Two properties that would
+  absent members leave the property untouched. Two JSON members that match
+  the same property (a repeated name, a case variant, the declared name
+  next to the Naming one) are always rejected. Two properties that would
   share a JSON name are an error, raised the first time the class is used.
 
   Thread safety: register mappings, converters and renames, and set the
@@ -720,41 +722,54 @@ var
   Value: TValue;
   Path: string;
   Child: TObject;
-  Known: Boolean;
+  MemberOf: array of Integer;  // per property: index of its JSON member, or -1
 begin
   if AJson.Kind <> jkObject then
     Mismatch(APath, 'object', AJson);
   Meta := GMetaCache.Get(AObject.ClassType);
   Names := ClassNames(AObject.ClassType);
 
-  // Before anything is assigned, so a rejected body changes nothing.
-  if FUnknownMembers = umError then
-    for K := 0 to AJson.Count - 1 do
+  // Match every JSON member to a property before anything is assigned, so a
+  // rejected body changes nothing. A member matches the property whose JSON
+  // name it equals case-insensitively, else the one whose declared name it
+  // equals (unless renamed). Two members on one property ("name" twice,
+  // "name" and "NAME", "created_at" and "CreatedAt") are always an error:
+  // other parsers would pick another of them than "first wins" or "last
+  // wins" would here.
+  SetLength(MemberOf, Length(Meta.Props));
+  for I := 0 to High(MemberOf) do
+    MemberOf[I] := -1;
+  for K := 0 to AJson.Count - 1 do
+  begin
+    I := 0;
+    while (I <= High(Meta.Props)) and not SameText(AJson.Names[K], Names.Names[I]) do
+      Inc(I);
+    if I > High(Meta.Props) then
     begin
-      Known := False;
-      for I := 0 to High(Meta.Props) do
-        if SameText(AJson.Names[K], Names.Names[I]) or
-          (not Names.Renamed[I] and SameText(AJson.Names[K], Meta.Props[I].Name)) then
-        begin
-          Known := True;
-          Break;
-        end;
-      if not Known then
+      I := 0;
+      while (I <= High(Meta.Props)) and
+        (Names.Renamed[I] or not SameText(AJson.Names[K], Meta.Props[I].Name)) do
+        Inc(I);
+    end;
+    if I > High(Meta.Props) then
+    begin
+      if FUnknownMembers = umError then
         raise EJsonMapperError.CreateFmt('%s: unknown member (no published property of %s matches it)',
           [MemberPath(APath, AJson.Names[K]), AObject.ClassName]);
+      Continue;
     end;
+    if MemberOf[I] >= 0 then
+      raise EJsonMapperError.CreateFmt('%s: duplicate member ("%s" and "%s" both match property %s.%s)',
+        [MemberPath(APath, Names.Names[I]), AJson.Names[MemberOf[I]], AJson.Names[K],
+         AObject.ClassName, Meta.Props[I].Name]);
+    MemberOf[I] := K;
+  end;
 
   for I := 0 to High(Meta.Props) do
   begin
-    // Exact name first, then case-insensitive; the declared property name
-    // too, unless the member was renamed.
-    Member := AJson.Find(Names.Names[I]);
-    if Member = nil then
-      Member := AJson.Find(Names.Names[I], True);
-    if (Member = nil) and not Names.Renamed[I] then
-      Member := AJson.Find(Meta.Props[I].Name, True);
-    if Member = nil then
+    if MemberOf[I] < 0 then
       Continue;
+    Member := AJson.Items[MemberOf[I]];
     Path := MemberPath(APath, Names.Names[I]);
 
     if (Meta.Props[I].TypeInfo^.Kind = tkClass) and

@@ -2,7 +2,8 @@
 
 { Tests for the JSON layer (PascalJsonMapper.Json): parsing (escapes,
   surrogate pairs, number text kept verbatim, syntax errors with position,
-  nesting limit), writing (escaping, deferred member names, number
+  nesting limit, duplicate names kept), Find (exact name before case
+  variants, ASCII-only case folding), writing (escaping, deferred member names, number
   formatting identical on both compilers) and ISO 8601 dates.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
@@ -48,6 +49,12 @@ type
     procedure Parse_DeepNesting_Raises;
     [Test]
     procedure Find_IgnoreCase;
+    [Test]
+    procedure Parse_DuplicateNames_AreKept;
+    [Test]
+    procedure Find_IgnoreCase_PrefersExactName;
+    [Test]
+    procedure Find_IgnoreCase_IsAsciiOnly;
   end;
 
   [TestFixture]
@@ -281,6 +288,53 @@ begin
   try
     TAssert.AssertTrue(V.Find('nome') = nil);
     TAssert.AssertEquals(Int64(1), V.Find('nome', True).AsInt64);
+  finally
+    V.Free;
+  end;
+end;
+
+procedure TJsonParserTests.Parse_DuplicateNames_AreKept;
+var
+  V: TJsonValue;
+begin
+  // The DOM doesn't choose: every member stays, in order (TJsonMapper is
+  // what rejects them).
+  V := ParseJson('{"a":1,"a":2,"A":3}');
+  try
+    TAssert.AssertEquals(3, V.Count);
+    TAssert.AssertEquals('a', V.Names[1]);
+    TAssert.AssertEquals(Int64(2), V[1].AsInt64);
+    TAssert.AssertEquals(Int64(1), V.Find('a').AsInt64);
+    TAssert.AssertEquals('{"a":1,"a":2,"A":3}', V.ToJson);
+  finally
+    V.Free;
+  end;
+end;
+
+procedure TJsonParserTests.Find_IgnoreCase_PrefersExactName;
+var
+  V: TJsonValue;
+begin
+  V := ParseJson('{"Nome":1,"nome":2,"NOME":3}');
+  try
+    TAssert.AssertEquals(Int64(2), V.Find('nome', True).AsInt64);
+    TAssert.AssertEquals(Int64(3), V.Find('NOME', True).AsInt64);
+    // No exact match: the first one ignoring case.
+    TAssert.AssertEquals(Int64(1), V.Find('nOME', True).AsInt64);
+  finally
+    V.Free;
+  end;
+end;
+
+procedure TJsonParserTests.Find_IgnoreCase_IsAsciiOnly;
+var
+  V: TJsonValue;
+begin
+  // "ÁGUA" and "água": SameText folds only A..Z, on both compilers.
+  V := ParseJson('{"' + U([$C1]) + 'GUA":1}');
+  try
+    TAssert.AssertTrue(V.Find(U([$E1]) + 'gua', True) = nil);
+    TAssert.AssertEquals(Int64(1), V.Find(U([$C1]) + 'gua', True).AsInt64);
   finally
     V.Free;
   end;

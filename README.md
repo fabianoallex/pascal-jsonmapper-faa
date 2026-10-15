@@ -6,7 +6,7 @@ JSON ⇄ object mapper for Object Pascal that compiles and behaves the same on *
 
 It extracts the idea of `Common.JsonMapper` from `delphi-api-infra-faa` (DTO interfaces, `RegisterMapping<I, C>`, `FromJson<I>`/`ToJson<I>`). It is not a drop-in replacement for that mapper.
 
-Current version: **0.3.0**. While it is 0.x the API may still change between minor versions; every change is listed in the [changelog](CHANGELOG.md).
+Current version: **0.4.0**. While it is 0.x the API may still change between minor versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Usage
 
@@ -59,6 +59,7 @@ Optionals (absent / null / value, as in a PATCH) are shown in pascal-db-faa's [0
 - **Interfaces** are created through `RegisterMapping<I, C>`. The class's own constructor runs. **Class-typed properties** are never created: reading populates the instance the property already holds.
 - **Names**: written in camelCase by default. `Naming := jnAsDeclared` keeps the declared names, and `jnSnakeCase` writes `created_at`, `user_id` and `http_status` (acronyms become one word; the rule is `JsonSnakeCase`). `RenameMember(TClass, 'Kind', 'type')` gives one property its own JSON name, for example a member named after a Pascal keyword; descendants inherit the rename. Names are read case-insensitively. Two properties that would end up with the same JSON name raise `EJsonMapperError` the first time the class is mapped. An absent member leaves the property untouched, and `null` into a scalar keeps the current value.
 - **Unknown members** are ignored by default. With `UnknownMembers := umError`, they raise `EJsonMapperError` with their path (`$.nmae: unknown member ...`) before anything is assigned, so a rejected body changes nothing, even through `PopulateObject`.
+- **Duplicate members** are always rejected, whatever `UnknownMembers` says. When two JSON members match the same property, reading raises `EJsonMapperError` with the path (`$.name: duplicate member ("name" and "NAME" both match property TPerson.Name)`) before anything at that level is assigned. That covers a repeated name, names that differ only in case (case is ignored, ASCII letters only), and the declared name next to the `Naming` one (`CreatedAt` and `created_at`). The second value counts even when it is `null` or of another type. The other way around, one member feeds at most one property: when it matches one property's JSON name and another's declared name (possible after a `RenameMember`), only the first one gets it. RFC 8259 only says names SHOULD be unique, and parsers disagree on which value wins (JavaScript, Python and Go keep the last one), so a gateway or log in front of the API could read a different body than the API does. The DOM itself (`ParseJson`) keeps every member, and `Find` returns the first exact match, or, with `AIgnoreCase` and no exact match, the first match ignoring case.
 - **Types**: strings, chars, all integer sizes (range-checked), `Int64`, `Single`/`Double`/`Extended`/`Currency`, `Boolean`, enums (by name), `TDateTime`/`TDate`/`TTime` (ISO 8601, no zone written; an offset on input converts to UTC), interfaces, dynamic arrays, objects. Anything else raises `EJsonMapperError` with the JSON path (`$.items[1].code`). The fix for an unsupported type is a converter.
 - **Converters** (`IJsonConverter`) run before the built-in rules, and the last registered wins. A converter can omit a member by writing nothing, which is how a bridge for optional types encodes *absent / null / value*. The library that owns a type should ship its converter in a separate unit or package, so neither core depends on the other. See [docs/converters.md](docs/converters.md) for how to write one, with pascal-common-faa's optionals as the worked example.
 - **Describing the JSON**: `Members(TClass)` lists a class's members as the mapper writes them: property name, JSON name (Naming and renames applied) and type, in order. For documentation and schema generators, so they can't drift from the wire format.
@@ -93,7 +94,7 @@ CI (`.github/workflows/ci.yml`) runs `tools/ci-test.sh` on every push: both scri
 
 On Delphi, open `PascalJsonMapper.groupproj` and run `PascalJsonMapper.UnitTests`. "Build All" only builds the active platform, so switch the target platform to build Win64. Every suite must end with 0 leaks.
 
-Last verified: FPC 3.2.2 Win64 and x86_64-linux (10 runs, including 5 pinned to one CPU), and Delphi 12 CE Win32 and Win64. Each passed 99/99 with 0 leaks.
+Last verified: FPC 3.2.2 Win64 and x86_64-linux, and Delphi 12 CE Win32 and Win64. Each passed 113/113 with 0 leaks.
 
 ## License
 

@@ -78,7 +78,10 @@ type
     property Names[AIndex: Integer]: string read GetName;
     procedure Add(AValue: TJsonValue);
     procedure AddPair(const AName: string; AValue: TJsonValue);
-    // Object lookup; nil if absent. First match wins on duplicate names.
+    // Object lookup; nil if absent. The parser keeps duplicate names, and
+    // Find returns the first exact match; with AIgnoreCase, only when there
+    // is none, the first match ignoring ASCII case. TJsonMapper doesn't use
+    // Find: it rejects duplicates instead of choosing one.
     function Find(const AName: string; AIgnoreCase: Boolean = False): TJsonValue;
 
     function ToJson(AIndent: Integer = 0): string;
@@ -366,8 +369,12 @@ var
 begin
   RequireKind(jkObject);
   for I := 0 to FCount - 1 do
-    if (FNames[I] = AName) or (AIgnoreCase and SameText(FNames[I], AName)) then
+    if FNames[I] = AName then
       Exit(FItems[I]);
+  if AIgnoreCase then
+    for I := 0 to FCount - 1 do
+      if SameText(FNames[I], AName) then
+        Exit(FItems[I]);
   Result := nil;
 end;
 

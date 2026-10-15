@@ -6,7 +6,9 @@
   new name matches, inherited by descendants, a descendant renaming again,
   bad arguments), two properties sharing a JSON name, and UnknownMembers :=
   umError (paths in nested objects and arrays, nothing assigned when a body
-  is rejected), and Members (what documentation tools read). The defaults
+  is rejected), duplicate members (rejected in any mode, also as case
+  variants and as declared name next to the Naming one), and Members (what
+  documentation tools read). The defaults
   stay camelCase and umIgnore.
 
   DUnitX master, written in FPCUnit's assertion dialect (TAssert.*, through
@@ -61,6 +63,22 @@ type
     procedure Strict_KnownVariants_Pass;
     [Test]
     procedure Strict_RejectedBody_ChangesNothing;
+    [Test]
+    procedure Duplicate_SameName_RaisesAndChangesNothing;
+    [Test]
+    procedure Duplicate_CaseVariant_Raises;
+    [Test]
+    procedure Duplicate_DeclaredAndSnakeName_Raises;
+    [Test]
+    procedure Duplicate_NullOrOtherType_StillRaises;
+    [Test]
+    procedure Duplicate_NestedAndArrayPaths;
+    [Test]
+    procedure Duplicate_UnderUmError_Raises;
+    [Test]
+    procedure Duplicate_RenamedDeclaredName_IsNotOne;
+    [Test]
+    procedure OneMember_FeedsOneProperty;
     [Test]
     procedure Members_NamesTypesAndOrder;
     [Test]
@@ -317,6 +335,135 @@ begin
   finally
     P.Free;
   end;
+end;
+
+procedure TNamingTests.Duplicate_SameName_RaisesAndChangesNothing;
+var
+  P: TPerson;
+begin
+  // Default mode (umIgnore). Other parsers keep the last value, so there is
+  // no answer every reader of this body would agree on.
+  P := TPerson.Create;
+  try
+    P.Name := 'before';
+    P.Address.Street := 'before';
+    try
+      FMapper.PopulateObject(P, '{"address":{"street":"x"},"name":"First","name":"Second"}');
+      TAssert.Fail('Must raise');
+    except
+      on E: EJsonMapperError do
+        TAssert.AssertEquals(
+          '$.name: duplicate member ("name" and "name" both match property TPerson.Name)',
+          E.Message);
+    end;
+    TAssert.AssertEquals('before', P.Name);
+    TAssert.AssertEquals('before', P.Address.Street);
+  finally
+    P.Free;
+  end;
+end;
+
+procedure TNamingTests.Duplicate_CaseVariant_Raises;
+begin
+  // Reading ignores case, so these are one member; before 0.4.0 the exact
+  // name won ("userID" here), wherever it was.
+  AssertRaises('{"USERID":1,"userID":2}', '$.userID: duplicate member ("USERID" and "userID"');
+  AssertRaises('{"UserId":1,"USERID":2}', '$.userID: duplicate member ("UserId" and "USERID"');
+end;
+
+procedure TNamingTests.Duplicate_DeclaredAndSnakeName_Raises;
+begin
+  FMapper.Naming := jnSnakeCase;
+  AssertRaises('{"CreatedAt":"a","created_at":"b"}',
+    '$.created_at: duplicate member ("CreatedAt" and "created_at" both match property TNamingDto.CreatedAt)');
+  AssertRaises('{"created_at":"a","CREATEDAT":"b"}', '$.created_at: duplicate member');
+end;
+
+procedure TNamingTests.Duplicate_NullOrOtherType_StillRaises;
+begin
+  // The second value is never read, but it still counts.
+  AssertRaises('{"createdAt":null,"createdAt":"x"}', '$.createdAt: duplicate member');
+  AssertRaises('{"createdAt":"x","createdAt":1}', '$.createdAt: duplicate member');
+end;
+
+procedure TNamingTests.Duplicate_NestedAndArrayPaths;
+var
+  Dto: IOrderDto;
+  P: TPerson;
+begin
+  try
+    Dto := FMapper.FromJson<IOrderDto>('{"item":{"code":1,"code":2}}');
+    TAssert.Fail('Must raise');
+  except
+    on E: EJsonMapperError do
+      TAssert.AssertTrue(E.Message, Pos('$.item.code: duplicate member', E.Message) = 1);
+  end;
+  try
+    Dto := FMapper.FromJson<IOrderDto>('{"itens":[{"code":1},{"code":2,"CODE":3}]}');
+    TAssert.Fail('Must raise');
+  except
+    on E: EJsonMapperError do
+      TAssert.AssertTrue(E.Message, Pos('$.itens[1].code: duplicate member', E.Message) = 1);
+  end;
+  // A whole object repeated, into a class property.
+  P := TPerson.Create;
+  try
+    try
+      FMapper.PopulateObject(P, '{"address":null,"address":{"street":"x"}}');
+      TAssert.Fail('Must raise');
+    except
+      on E: EJsonMapperError do
+        TAssert.AssertTrue(E.Message, Pos('$.address: duplicate member', E.Message) = 1);
+    end;
+    try
+      FMapper.PopulateObject(P, '{"address":{"street":"x","Street":"y"}}');
+      TAssert.Fail('Must raise');
+    except
+      on E: EJsonMapperError do
+        TAssert.AssertTrue(E.Message, Pos('$.address.street: duplicate member', E.Message) = 1);
+    end;
+  finally
+    P.Free;
+  end;
+end;
+
+procedure TNamingTests.Duplicate_UnderUmError_Raises;
+begin
+  // The member is known, so this was never an "unknown member".
+  FMapper.UnknownMembers := umError;
+  AssertRaises('{"kind":"a","kind":"b"}', '$.kind: duplicate member');
+end;
+
+procedure TNamingTests.Duplicate_RenamedDeclaredName_IsNotOne;
+var
+  Dto: INamingDto;
+begin
+  // After a rename the declared name matches nothing, so it is ignored
+  // (umIgnore) instead of counting as a second "type".
+  FMapper.RenameMember(TNamingDto, 'Kind', 'type');
+  Dto := FMapper.FromJson<INamingDto>('{"kind":"ignored","type":"kept"}');
+  TAssert.AssertEquals('kept', (Dto as TNamingDto).Kind);
+  AssertRaises('{"type":"a","TYPE":"b"}', '$.type: duplicate member');
+end;
+
+procedure TNamingTests.OneMember_FeedsOneProperty;
+var
+  Dto: INamingDto;
+  D: TNamingDto;
+begin
+  // Kind renamed to "CreatedAt", which is also CreatedAt's declared name
+  // (its JSON name is created_at). The JSON name wins: "CreatedAt" goes to
+  // Kind only. Until 0.3.0 it was written into both properties.
+  FMapper.Naming := jnSnakeCase;
+  FMapper.RenameMember(TNamingDto, 'Kind', 'CreatedAt');
+  Dto := FMapper.FromJson<INamingDto>('{"createdat":"x"}');
+  D := Dto as TNamingDto;
+  TAssert.AssertEquals('x', D.Kind);
+  TAssert.AssertEquals('', D.CreatedAt);
+  Dto := FMapper.FromJson<INamingDto>('{"CreatedAt":"x","created_at":"y"}');
+  D := Dto as TNamingDto;
+  TAssert.AssertEquals('x', D.Kind);
+  TAssert.AssertEquals('y', D.CreatedAt);
 end;
 
 procedure TNamingTests.Members_NamesTypesAndOrder;

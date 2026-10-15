@@ -6,6 +6,32 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-15
+
+### Changed
+
+- **Behavior change**: reading rejects duplicate members. When two JSON members match the same
+  property, `EJsonMapperError` is raised with the path, e.g. `$.name: duplicate member ("name"
+  and "NAME" both match property TPerson.Name)`, before anything at that level is assigned. It
+  applies with any `UnknownMembers` setting and at any depth (nested objects, array elements,
+  class properties). "Same property" means what reading already matched: a repeated name, names
+  that differ only in ASCII case, and the declared name next to the `Naming` one (`CreatedAt`
+  and `created_at` under `jnSnakeCase`). After `RenameMember`, the declared name matches nothing,
+  so it isn't a duplicate. Until 0.3.0 one of the values was used silently, and which one
+  depended on spelling, not on order: the exact name won wherever it was (`{"NAME":"First",
+  "name":"Second"}` gave `Second`), otherwise the first match won, the `Naming` name beat the
+  declared one, and a leading `null` left the property untouched. JavaScript, Python and Go
+  keep the last value, so a component that reads the body before the API (gateway, WAF, audit
+  log) could see different data than the API.
+- **Behavior change**: one JSON member feeds at most one property. A member that matches one
+  property's JSON name and another property's declared name goes to the first one only. That
+  takes a rename onto another property's declared name: with `jnSnakeCase` and `Kind` renamed
+  to `"CreatedAt"`, `{"CreatedAt":"x"}` now sets `Kind` and leaves `CreatedAt` alone; until
+  0.3.0 it set both.
+- `TJsonValue.Find(AName, True)` returns an exact match before a case variant. It used to return
+  the first match ignoring case, even when an exact one came later (`{"Nome":1,"nome":2}`:
+  `Find('nome', True)` gave 1, now 2). `ParseJson` still keeps duplicate names, in order.
+
 ## [0.3.0] - 2026-10-08
 
 ### Added
@@ -90,7 +116,9 @@ x86_64-linux and on Delphi 12 CE Win32 and Win64.
   round trips; Linux runs through Docker (`tools/test_fpc_docker.sh`,
   `tools/test_samples_docker.sh`); CI on every push (`tools/ci-test.sh`).
 
-[Unreleased]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/releases/tag/v0.1.0
