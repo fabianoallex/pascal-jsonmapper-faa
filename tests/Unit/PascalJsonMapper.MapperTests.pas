@@ -151,6 +151,28 @@ type
   end;
 
   [TestFixture]
+  TMapperCurrencyTests = class
+  private
+    FMapper: TJsonMapper;
+    procedure AssertAll(ADto: TCurrencyDto; AUnits: Int64);
+  public
+    [Setup]
+    procedure SetUp;
+    [TearDown]
+    procedure TearDown;
+    [Test]
+    procedure RoundTrip_EveryAccessKind_ToTheLimits;
+    [Test]
+    procedure VirtualAccessors_AreTheOverrides;
+    [Test]
+    procedure RoundTrip_EveryAccessKind_Random;
+    [Test]
+    procedure Read_HalfEven_AndExponent;
+    [Test]
+    procedure TopLevel_AndArrays_ToTheLimits;
+  end;
+
+  [TestFixture]
   TMapperRegistrationTests = class
   public
     [Test]
@@ -499,10 +521,8 @@ begin
     on E: EJsonInputError do
       TAssert.AssertEquals('$.valor: Number -1e15 is out of range', E.Message);
   end;
-  // Large values within range, and an exponent. (Kept below 2^53/10000:
-  // on FPC 3.2.2 TRttiProperty.SetValue stores Currency through Double, so
-  // larger values lose their last digits and the top of the range raises
-  // EInvalidOp. That was so before 0.5.0 too.)
+  // Large values within range (TMapperCurrencyTests goes to the limits),
+  // and an exponent.
   Dto := FMapper.FromJson<IScalarDto>('{"valor":900000000000.1234}');
   Cur := Scalar(Dto).Valor;
   TAssert.AssertEquals(Int64(9000000000001234), PInt64(@Cur)^);
@@ -914,6 +934,158 @@ begin
   TAssert.AssertEquals('{"nome":"","apelido":"constant"}', FMapper.ToJson<IPatchDto>(Dto));
 end;
 
+{ TMapperCurrencyTests }
+
+procedure TMapperCurrencyTests.SetUp;
+begin
+  FMapper := NewTestMapper;
+end;
+
+procedure TMapperCurrencyTests.TearDown;
+begin
+  FreeAndNil(FMapper);
+end;
+
+procedure TMapperCurrencyTests.AssertAll(ADto: TCurrencyDto; AUnits: Int64);
+begin
+  TAssert.AssertEquals('campo', AUnits, UnitsOf(ADto.Campo));
+  TAssert.AssertEquals('metodo', AUnits, UnitsOf(ADto.Metodo));
+  TAssert.AssertEquals('virt', AUnits, UnitsOf(ADto.Virt));
+  TAssert.AssertEquals('indexado', AUnits, UnitsOf(ADto.Indexado));
+  TAssert.AssertEquals('misto', AUnits, UnitsOf(ADto.Misto));
+  TAssert.AssertEquals('preco', AUnits, UnitsOf(ADto.PrecoValue));
+end;
+
+procedure TMapperCurrencyTests.RoundTrip_EveryAccessKind_ToTheLimits;
+const
+  // Until 0.5.0, on FPC Win64 the large ones lost digits and the top ones
+  // raised EInvalidOp, writing and reading.
+  Cases: array[0..8] of Int64 = (High(Int64), High(Int64) - 1, Low(Int64),
+    Low(Int64) + 1, 9007199254740993, 1234567890123456789, -1234567890123456789,
+    -1, 0);
+var
+  Src, Dst: TCurrencyDto;
+  I: Integer;
+  Text, Json: string;
+begin
+  for I := 0 to High(Cases) do
+  begin
+    Src := TCurrencyDto.Create;
+    Dst := TCurrencyDto.Create;
+    try
+      Src.SetAll(CurrOf(Cases[I]));
+      Text := JsonCurrencyToStr(CurrOf(Cases[I]));
+      Json := FMapper.ObjectToJson(Src);
+      TAssert.AssertEquals('{"campo":' + Text + ',"metodo":' + Text + ',"virt":' + Text +
+        ',"indexado":' + Text + ',"misto":' + Text + ',"preco":' + Text + '}', Json);
+      FMapper.PopulateObject(Dst, Json);
+      AssertAll(Dst, Cases[I]);
+    finally
+      Src.Free;
+      Dst.Free;
+    end;
+  end;
+  // The limits as text, not only as JsonCurrencyToStr writes them.
+  Dst := TCurrencyDto.Create;
+  try
+    FMapper.PopulateObject(Dst, '{"campo":922337203685477.5807,"metodo":922337203685477.5807,' +
+      '"virt":922337203685477.5807,"indexado":922337203685477.5807,' +
+      '"misto":922337203685477.5807,"preco":922337203685477.5807}');
+    AssertAll(Dst, High(Int64));
+    FMapper.PopulateObject(Dst, '{"campo":-922337203685477.5808,"metodo":-922337203685477.5808,' +
+      '"virt":-922337203685477.5808,"indexado":-922337203685477.5808,' +
+      '"misto":-922337203685477.5808,"preco":-922337203685477.5808}');
+    AssertAll(Dst, Low(Int64));
+  finally
+    Dst.Free;
+  end;
+end;
+
+procedure TMapperCurrencyTests.VirtualAccessors_AreTheOverrides;
+var
+  Dto: TCurrencyChildDto;
+begin
+  Dto := TCurrencyChildDto.Create;
+  try
+    Dto.SetAll(CurrOf(5));
+    Dto.VirtReads := 0;
+    Dto.VirtWrites := 0;
+    TAssert.AssertEquals('{"campo":0.0005,"metodo":0.0005,"virt":0.0005,"indexado":0.0005,' +
+      '"misto":0.0005,"preco":0.0005}', FMapper.ObjectToJson(Dto));
+    TAssert.AssertEquals(1, Dto.VirtReads);
+    FMapper.PopulateObject(Dto, '{"virt":12.5}');
+    TAssert.AssertEquals(1, Dto.VirtWrites);
+    TAssert.AssertEquals(Int64(125000), UnitsOf(Dto.Virt));
+  finally
+    Dto.Free;
+  end;
+end;
+
+procedure TMapperCurrencyTests.RoundTrip_EveryAccessKind_Random;
+var
+  Src, Dst: TCurrencyDto;
+  State: UInt64;
+  I: Integer;
+  Units: Int64;
+begin
+  Src := TCurrencyDto.Create;
+  Dst := TCurrencyDto.Create;
+  try
+    State := 88172645463325252;
+    for I := 1 to 5000 do
+    begin
+      Units := RandomCurrencyUnits(State);
+      Src.SetAll(CurrOf(Units));
+      FMapper.PopulateObject(Dst, FMapper.ObjectToJson(Src));
+      AssertAll(Dst, Units);
+    end;
+  finally
+    Src.Free;
+    Dst.Free;
+  end;
+end;
+
+procedure TMapperCurrencyTests.Read_HalfEven_AndExponent;
+var
+  Dto: TCurrencyDto;
+begin
+  Dto := TCurrencyDto.Create;
+  try
+    FMapper.PopulateObject(Dto, '{"campo":0.00025,"metodo":0.00035,"virt":1.5e3,' +
+      '"indexado":-0.00005,"misto":0.000049999,"preco":1e-4}');
+    TAssert.AssertEquals(Int64(2), UnitsOf(Dto.Campo));
+    TAssert.AssertEquals(Int64(4), UnitsOf(Dto.Metodo));
+    TAssert.AssertEquals(Int64(15000000), UnitsOf(Dto.Virt));
+    TAssert.AssertEquals(Int64(0), UnitsOf(Dto.Indexado));
+    TAssert.AssertEquals(Int64(0), UnitsOf(Dto.Misto));
+    TAssert.AssertEquals(Int64(1), UnitsOf(Dto.PrecoValue));
+  finally
+    Dto.Free;
+  end;
+end;
+
+procedure TMapperCurrencyTests.TopLevel_AndArrays_ToTheLimits;
+var
+  Arr: TCurrArray;
+  C: Currency;
+begin
+  SetLength(Arr, 3);
+  Arr[0] := CurrOf(High(Int64));
+  Arr[1] := CurrOf(Low(Int64));
+  Arr[2] := CurrOf(-1);
+  TAssert.AssertEquals('[922337203685477.5807,-922337203685477.5808,-0.0001]',
+    FMapper.Serialize<TCurrArray>(Arr));
+  Arr := FMapper.Deserialize<TCurrArray>('[922337203685477.5807,-922337203685477.5808,0.00015]');
+  TAssert.AssertEquals(3, Length(Arr));
+  TAssert.AssertEquals(High(Int64), UnitsOf(Arr[0]));
+  TAssert.AssertEquals(Low(Int64), UnitsOf(Arr[1]));
+  TAssert.AssertEquals(Int64(2), UnitsOf(Arr[2]));
+  C := CurrOf(High(Int64));
+  TAssert.AssertEquals('922337203685477.5807', FMapper.Serialize<Currency>(C));
+  C := FMapper.Deserialize<Currency>('-922337203685477.5808');
+  TAssert.AssertEquals(Low(Int64), UnitsOf(C));
+end;
+
 { TMapperRegistrationTests }
 
 procedure TMapperRegistrationTests.FindImplClass;
@@ -957,6 +1129,7 @@ initialization
   TDUnitX.RegisterTestFixture(TMapperWriteTests);
   TDUnitX.RegisterTestFixture(TMapperTopLevelTests);
   TDUnitX.RegisterTestFixture(TMapperConverterTests);
+  TDUnitX.RegisterTestFixture(TMapperCurrencyTests);
   TDUnitX.RegisterTestFixture(TMapperRegistrationTests);
 
 end.

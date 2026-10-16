@@ -6,7 +6,7 @@ JSON ⇄ object mapper for Object Pascal that compiles and behaves the same on *
 
 It extracts the idea of `Common.JsonMapper` from `delphi-api-infra-faa` (DTO interfaces, `RegisterMapping<I, C>`, `FromJson<I>`/`ToJson<I>`). It is not a drop-in replacement for that mapper.
 
-Current version: **0.5.0**. While it is 0.x the API may still change between minor versions; every change is listed in the [changelog](CHANGELOG.md).
+Current version: **0.6.0**. While it is 0.x the API may still change between minor versions; every change is listed in the [changelog](CHANGELOG.md).
 
 ## Usage
 
@@ -62,6 +62,7 @@ Optionals (absent / null / value, as in a PATCH) are shown in pascal-db-faa's [0
 - **Duplicate members** are always rejected, whatever `UnknownMembers` says. When two JSON members match the same property, reading raises `EJsonInputError` with the path (`$.name: duplicate member ("name" and "NAME")`) before anything at that level is assigned. That covers a repeated name, names that differ only in case (case is ignored, ASCII letters only), and the declared name next to the `Naming` one (`CreatedAt` and `created_at`). The second value counts even when it is `null` or of another type. The other way around, one member feeds at most one property: when it matches one property's JSON name and another's declared name (possible after a `RenameMember`), only the first one gets it. RFC 8259 only says names SHOULD be unique, and parsers disagree on which value wins (JavaScript, Python and Go keep the last one), so a gateway or log in front of the API could read a different body than the API does. The DOM itself (`ParseJson`) keeps every member, and `Find` returns the first exact match, or, with `AIgnoreCase` and no exact match, the first match ignoring case.
 - **Errors** are `EJsonMapperError`. When the JSON being read is at fault (unknown or duplicate member, a JSON type that doesn't fit, a number out of range, a bad date, a value a converter rejects), the error is the subclass `EJsonInputError`. Its message has only the JSON path and the reason in JSON terms (`$.status: "osLost" is not an accepted value`, `$.level: 300 is out of range (0..255)`), so an API can return it to the client as is. `Path` holds the path, and `Detail` holds the Pascal side for logs (`not a value of TOrderStatus`, `type Byte`, `both match property TPerson.Name`), or `''`. Every other `EJsonMapperError` is a setup or programming error: a type without converter, an unregistered interface, a nil class property, two properties sharing a JSON name. Its message names Pascal classes and types, and it may have a path too, so a server should answer it as its own failure (500), not the client's. Invalid JSON text raises `EJsonParseError` (an `EJsonError`, with its position), not `EJsonInputError`.
 - **Types**: strings, chars, all integer sizes (range-checked), `Int64`, `Single`/`Double`/`Extended`/`Currency`, `Boolean`, enums (by name), `TDateTime`/`TDate`/`TTime` (ISO 8601, no zone written; an offset on input converts to UTC), interfaces, dynamic arrays, objects. Anything else raises `EJsonMapperError` with the JSON path (`$.items[1].code`), a setup error. The fix for an unsupported type is a converter.
+- **Currency** is exact over its whole range, `Low(Currency)` to `High(Currency)`, on every compiler and target. It is written with up to 4 decimals and no trailing zeros (`12.5`, `-922337203685477.5808`). Reading accepts any JSON number, exponent included (`1.5e3`), and rounds anything beyond 4 decimals half to even (`0.00025` → `0.0002`). A value outside the range raises `EJsonInputError`.
 - **Converters** (`IJsonConverter`) run before the built-in rules, and the last registered wins. A converter can omit a member by writing nothing, which is how a bridge for optional types encodes *absent / null / value*. The library that owns a type should ship its converter in a separate unit or package, so neither core depends on the other. See [docs/converters.md](docs/converters.md) for how to write one, with pascal-common-faa's optionals as the worked example.
 - **Describing the JSON**: `Members(TClass)` lists a class's members as the mapper writes them: property name, JSON name (Naming and renames applied) and type, in order. For documentation and schema generators, so they can't drift from the wire format.
 - **Threads**: register at startup, then use from any thread. Class metadata is cached under a lock.
@@ -72,6 +73,8 @@ Optionals (absent / null / value, as in a PATCH) are shown in pascal-db-faa's [0
 `PascalJsonMapper.Json` is a small DOM, parser and writer of its own, not System.JSON or fpjson. Output is byte-identical on both compilers. Numbers keep their source text, so an `Int64` above 2^53 survives a round trip.
 
 `Double`/`Single` conversion doesn't use the RTL either. Writing uses Burger & Dybvig's algorithm, which gives the shortest text that reads back exactly. Reading rounds half to even. Both use exact integer arithmetic, so every compiler and target produces the same text and the same bits. The RTL's conversions differ in the last digit: FPC 3.2.2 Win64's `FloatToStrF` stops at 15 digits, and Delphi 12 Win64 printed `0.30000000000000004` as `0.30000000000000006`.
+
+`Currency` goes through its `Int64` count of 1/10000 and never through floating point (`JsonCurrencyToStr`, `JsonStrToCurrency`). Currency properties are read and written through their `PropInfo` (field, static, virtual or indexed method), not `TRttiProperty.GetValue`/`SetValue`. FPC 3.2.2 converts through `Extended` there, which is a `Double` on Win64: large values lost digits and the top of the range raised `EInvalidOp`. On Linux, both that and the RTL's `StrToCurr` could still miss by one unit.
 
 ## Tests
 
@@ -95,7 +98,7 @@ CI (`.github/workflows/ci.yml`) runs `tools/ci-test.sh` on every push: both scri
 
 On Delphi, open `PascalJsonMapper.groupproj` and run `PascalJsonMapper.UnitTests`. "Build All" only builds the active platform, so switch the target platform to build Win64. Every suite must end with 0 leaks.
 
-Last verified: FPC 3.2.2 Win64 and x86_64-linux, and Delphi 12 CE Win32 and Win64. Each passed 116/116 with 0 leaks.
+Last verified: FPC 3.2.2 Win64 and x86_64-linux, and Delphi 12 CE Win32 and Win64. Each passed 127/127 with 0 leaks.
 
 ## License
 

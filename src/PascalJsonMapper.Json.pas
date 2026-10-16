@@ -148,7 +148,16 @@ function JsonFloatToStr(AValue: Double): string;
 function JsonSingleToStr(AValue: Single): string;
 function JsonStrToDouble(const AText: string): Double;
 function JsonStrToSingle(const AText: string): Single;
+
+// Currency both ways through its Int64 count of 1/10000, never through
+// floating point: exact over the whole range on every compiler and target
+// (the RTL's StrToCurr goes through Extended on FPC/Linux). Writing gives up
+// to 4 decimals, trailing zeros dropped ("12.5", "-0.0001", "3"). Reading
+// takes any JSON number, exponent included ("1.5e3"); beyond 4 decimals it
+// rounds half to even ("0.00025" -> 0.0002). It raises EJsonError for
+// malformed text or a value outside Currency's range.
 function JsonCurrencyToStr(AValue: Currency): string;
+function JsonStrToCurrency(const AText: string): Currency;
 
 // ISO 8601. Output has no zone designator: TDateTime carries no zone, so the
 // value is written as is. Input accepts date-only, date-time with optional
@@ -1445,15 +1454,92 @@ end;
 
 function JsonCurrencyToStr(AValue: Currency): string;
 var
-  L: Integer;
+  Units: Int64;
+  Magnitude: UInt64;
+  Frac: string;
 begin
-  Result := CurrToStrF(AValue, ffFixed, 4, GFormatSettings);
-  L := Length(Result);
-  while Result[L] = '0' do
-    Dec(L);
-  if Result[L] = '.' then
-    Dec(L);
-  SetLength(Result, L);
+  Move(AValue, Units, SizeOf(Units));
+  // -(Low(Int64)) doesn't fit an Int64: negate one less, then add it back.
+  if Units < 0 then
+    Magnitude := UInt64(-(Units + 1)) + 1
+  else
+    Magnitude := UInt64(Units);
+  Result := IntToStr(Int64(Magnitude div 10000));
+  Frac := IntToStr(Integer(Magnitude mod 10000));
+  if Frac <> '0' then
+  begin
+    while Length(Frac) < 4 do
+      Frac := '0' + Frac;
+    while Frac[Length(Frac)] = '0' do
+      SetLength(Frac, Length(Frac) - 1);
+    Result := Result + '.' + Frac;
+  end;
+  if Units < 0 then
+    Result := '-' + Result;
+end;
+
+function JsonStrToCurrency(const AText: string): Currency;
+var
+  Negative, RoundUp: Boolean;
+  Digits, Dropped: string;
+  Exp10, Shift, KeepLen, I: Integer;
+  Magnitude, Limit: UInt64;
+  Units: Int64;
+begin
+  if not SplitNumber(AText, Negative, Digits, Exp10) then
+    raise EJsonError.CreateFmt('Invalid number "%s"', [AText]);
+  // Value = Digits x 10^Exp10, so units = Digits x 10^(Exp10 + 4). Digits
+  // has no leading or trailing zeros ("0" for zero).
+  Shift := Exp10 + 4;
+  RoundUp := False;
+  if Digits = '0' then
+    KeepLen := 0
+  else if Shift >= 0 then
+  begin
+    // Every digit is kept, then Shift zeros. More than 19 digits is beyond
+    // 2^63 for sure; 19 digits still fit a UInt64.
+    if Length(Digits) + Shift > 19 then
+      raise EJsonError.CreateFmt('Number %s is out of range', [AText]);
+    KeepLen := Length(Digits);
+  end
+  else
+  begin
+    KeepLen := Length(Digits) + Shift;
+    if KeepLen > 19 then
+      raise EJsonError.CreateFmt('Number %s is out of range', [AText]);
+    if KeepLen >= 0 then
+    begin
+      // Half to even. Dropped never ends in '0', so a "5" with anything
+      // after it is above the half.
+      Dropped := Copy(Digits, KeepLen + 1, MaxInt);
+      if Dropped[1] > '5' then
+        RoundUp := True
+      else if Dropped[1] = '5' then
+        RoundUp := (Length(Dropped) > 1) or
+          ((KeepLen > 0) and Odd(Ord(Digits[KeepLen]) - Ord('0')));
+    end
+    else
+      KeepLen := 0;  // below 0.00005: zeros come first, so it rounds down
+  end;
+  Magnitude := 0;
+  for I := 1 to KeepLen do
+    Magnitude := Magnitude * 10 + UInt64(Ord(Digits[I]) - Ord('0'));
+  if KeepLen > 0 then
+    for I := 1 to Shift do
+      Magnitude := Magnitude * 10;
+  if RoundUp then
+    Inc(Magnitude);
+  // Currency's range in units: High(Int64), one more for Low(Int64).
+  Limit := UInt64(High(Int64));
+  if Negative then
+    Inc(Limit);
+  if Magnitude > Limit then
+    raise EJsonError.CreateFmt('Number %s is out of range', [AText]);
+  if Negative and (Magnitude > 0) then
+    Units := -Int64(Magnitude - 1) - 1
+  else
+    Units := Int64(Magnitude);
+  Move(Units, Result, SizeOf(Result));
 end;
 
 { Dates }

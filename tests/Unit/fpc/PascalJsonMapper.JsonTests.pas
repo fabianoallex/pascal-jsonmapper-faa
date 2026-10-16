@@ -69,6 +69,12 @@ type
     procedure Write_Single_Subnormal;
     procedure RoundTrip_Double_RandomBits;
     procedure RoundTrip_Single_RandomBits;
+    procedure Write_Currency_Limits;
+    procedure Read_Currency_ExactToTheLimits;
+    procedure Read_Currency_HalfEven;
+    procedure Read_Currency_Exponents;
+    procedure Read_Currency_OutOfRangeOrInvalid_Raises;
+    procedure RoundTrip_Currency_Random;
   end;
 
   TJsonDateTests = class(TTestCase)
@@ -507,15 +513,6 @@ begin
   Move(ABits, Result, SizeOf(Result));
 end;
 
-// xorshift64: shifts and xors only, so no overflow-check trap under $Q+.
-function NextRandom(var AState: UInt64): UInt64;
-begin
-  AState := AState xor (AState shl 13);
-  AState := AState xor (AState shr 7);
-  AState := AState xor (AState shl 17);
-  Result := AState;
-end;
-
 procedure AssertDoubleBits(const AText: string; AExpected: Int64);
 begin
   TAssert.AssertEquals(AText, AExpected, DoubleBits(JsonStrToDouble(AText)));
@@ -632,6 +629,110 @@ begin
     Text := JsonSingleToStr(SingleFromBits(Bits));
     if SingleBits(JsonStrToSingle(Text)) <> Int64(Bits) then
       TAssert.Fail('Round trip of ' + IntToHex(Int64(Bits), 8) + ' via ' + Text);
+  end;
+end;
+
+procedure TJsonNumberTests.Write_Currency_Limits;
+begin
+  TAssert.AssertEquals('922337203685477.5807', JsonCurrencyToStr(CurrOf(High(Int64))));
+  TAssert.AssertEquals('-922337203685477.5808', JsonCurrencyToStr(CurrOf(Low(Int64))));
+  TAssert.AssertEquals('-922337203685477.5807', JsonCurrencyToStr(CurrOf(Low(Int64) + 1)));
+  TAssert.AssertEquals('900719925474.0993', JsonCurrencyToStr(CurrOf(9007199254740993)));
+  TAssert.AssertEquals('-0.0001', JsonCurrencyToStr(CurrOf(-1)));
+  TAssert.AssertEquals('0.01', JsonCurrencyToStr(CurrOf(100)));
+  TAssert.AssertEquals('-7', JsonCurrencyToStr(CurrOf(-70000)));
+  TAssert.AssertEquals('0', JsonCurrencyToStr(CurrOf(0)));
+end;
+
+procedure TJsonNumberTests.Read_Currency_ExactToTheLimits;
+begin
+  TAssert.AssertEquals(High(Int64), UnitsOf(JsonStrToCurrency('922337203685477.5807')));
+  TAssert.AssertEquals(Low(Int64), UnitsOf(JsonStrToCurrency('-922337203685477.5808')));
+  TAssert.AssertEquals(Low(Int64) + 1, UnitsOf(JsonStrToCurrency('-922337203685477.5807')));
+  TAssert.AssertEquals(Int64(9007199254740993), UnitsOf(JsonStrToCurrency('900719925474.0993')));
+  // Values the FPC RTL's StrToCurr (through Extended on Linux) missed by one.
+  TAssert.AssertEquals(Int64(-8017229805056271539), UnitsOf(JsonStrToCurrency('-801722980505627.1539')));
+  TAssert.AssertEquals(Int64(6769831618945329639), UnitsOf(JsonStrToCurrency('676983161894532.9639')));
+  TAssert.AssertEquals(Int64(0), UnitsOf(JsonStrToCurrency('-0')));
+  TAssert.AssertEquals(Int64(0), UnitsOf(JsonStrToCurrency('0.0000')));
+  TAssert.AssertEquals(Int64(1), UnitsOf(JsonStrToCurrency('0.0001')));
+end;
+
+procedure TJsonNumberTests.Read_Currency_HalfEven;
+begin
+  // Exactly half: to the even last digit.
+  TAssert.AssertEquals(Int64(0), UnitsOf(JsonStrToCurrency('0.00005')));
+  TAssert.AssertEquals(Int64(2), UnitsOf(JsonStrToCurrency('0.00015')));
+  TAssert.AssertEquals(Int64(2), UnitsOf(JsonStrToCurrency('0.00025')));
+  TAssert.AssertEquals(Int64(-2), UnitsOf(JsonStrToCurrency('-0.00025')));
+  TAssert.AssertEquals(Int64(12346), UnitsOf(JsonStrToCurrency('1.23455')));
+  TAssert.AssertEquals(Int64(12344), UnitsOf(JsonStrToCurrency('1.23445')));
+  // Not half: to the nearest.
+  TAssert.AssertEquals(Int64(1), UnitsOf(JsonStrToCurrency('0.000050001')));
+  TAssert.AssertEquals(Int64(0), UnitsOf(JsonStrToCurrency('0.000049999')));
+  TAssert.AssertEquals(Int64(12346), UnitsOf(JsonStrToCurrency('1.23456')));
+  TAssert.AssertEquals(Int64(0), UnitsOf(JsonStrToCurrency('0.0000000001')));
+  // Rounding stays inside the range at the bottom (8 is even)...
+  TAssert.AssertEquals(Low(Int64), UnitsOf(JsonStrToCurrency('-922337203685477.58085')));
+  // ...and may leave it at the top (7 rounds up to 8).
+  try
+    JsonStrToCurrency('922337203685477.58075');
+    TAssert.Fail('Rounding past High(Currency) must raise');
+  except
+    on E: EJsonError do
+      TAssert.AssertEquals('Number 922337203685477.58075 is out of range', E.Message);
+  end;
+end;
+
+procedure TJsonNumberTests.Read_Currency_Exponents;
+begin
+  TAssert.AssertEquals(Int64(15000000), UnitsOf(JsonStrToCurrency('1.5e3')));
+  TAssert.AssertEquals(Int64(12300000), UnitsOf(JsonStrToCurrency('12.3E+2')));
+  TAssert.AssertEquals(Int64(1), UnitsOf(JsonStrToCurrency('1e-4')));
+  TAssert.AssertEquals(Int64(2), UnitsOf(JsonStrToCurrency('25e-5')));
+  TAssert.AssertEquals(Int64(0), UnitsOf(JsonStrToCurrency('25e-6')));
+  TAssert.AssertEquals(Int64(0), UnitsOf(JsonStrToCurrency('1e-400')));
+  TAssert.AssertEquals(Int64(0), UnitsOf(JsonStrToCurrency('0e999')));
+  TAssert.AssertEquals(High(Int64), UnitsOf(JsonStrToCurrency('9223372036854775807e-4')));
+  TAssert.AssertEquals(Int64(-90000000000000000), UnitsOf(JsonStrToCurrency('-9e12')));
+end;
+
+procedure TJsonNumberTests.Read_Currency_OutOfRangeOrInvalid_Raises;
+
+  procedure Check(const AText, AExpected: string);
+  begin
+    try
+      JsonStrToCurrency(AText);
+      TAssert.Fail('Must raise: ' + AText);
+    except
+      on E: EJsonError do
+        TAssert.AssertEquals(AExpected, E.Message);
+    end;
+  end;
+
+begin
+  Check('922337203685477.5808', 'Number 922337203685477.5808 is out of range');
+  Check('-922337203685477.5809', 'Number -922337203685477.5809 is out of range');
+  Check('1e15', 'Number 1e15 is out of range');
+  Check('-1e300', 'Number -1e300 is out of range');
+  Check('99999999999999999999', 'Number 99999999999999999999 is out of range');
+  Check('1.', 'Invalid number "1."');
+  Check('abc', 'Invalid number "abc"');
+end;
+
+procedure TJsonNumberTests.RoundTrip_Currency_Random;
+var
+  State: UInt64;
+  I: Integer;
+  Units: Int64;
+  Text: string;
+begin
+  State := 20261016;
+  for I := 1 to 20000 do
+  begin
+    Units := RandomCurrencyUnits(State);
+    Text := JsonCurrencyToStr(CurrOf(Units));
+    TAssert.AssertEquals(Text, Units, UnitsOf(JsonStrToCurrency(Text)));
   end;
 end;
 

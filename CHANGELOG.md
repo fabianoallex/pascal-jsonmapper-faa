@@ -6,6 +6,36 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-16
+
+### Fixed
+
+- `Currency` is exact over its whole range on FPC 3.2.2. Until 0.5.0, on Win64, writing and
+  reading a Currency property lost the last digits of large values (seen from
+  `274930337802.1077`; `123456789012345.6789` was written as `123456789012345.6768`). From
+  `922337203685477.5296` up to `High(Currency)` it raised `EInvalidOp`, without a path.
+  `-922337203685477.5807` became `-922337203685477.5808`. In 100 000 random values, 13 235
+  didn't survive a round trip. On Linux, 62 of those 100 000 were off by one unit, all above about
+  `5.6e14`. The causes are `TRttiProperty.GetValue`/`SetValue`, which go through `Extended` for
+  Currency (a `Double` on Win64), and, on Linux, the RTL's `StrToCurr`. Currency properties are
+  now read and written through their `PropInfo` (field, static, virtual or indexed method), and
+  the text through the Int64 count of 1/10000. Delphi 12 Win32 and Win64 were already exact (0
+  of 100 000), so what they write doesn't change.
+
+### Added
+
+- `JsonStrToCurrency(AText)`: the inverse of `JsonCurrencyToStr`, exact, with no floating point.
+  It accepts any JSON number, exponent included, and raises `EJsonError` for malformed text or a
+  value outside Currency's range. `JsonCurrencyToStr` no longer calls `CurrToStrF`; its output
+  is the same.
+
+### Changed
+
+- Reading a Currency with more than 4 decimals rounds half to even on every target: `0.00025` →
+  `0.0002`, `0.00035` → `0.0004`, `0.000049999` → `0`. Before, it depended on the target, as
+  measured on FPC: on Win64, `0.00025` gave `0.0003` and `0.000049999` gave `0.0001`; on Linux,
+  `0.00025` gave `0.0002`. Delphi wasn't measured.
+
 ## [0.5.0] - 2026-10-15
 
 ### Added
@@ -151,7 +181,8 @@ x86_64-linux and on Delphi 12 CE Win32 and Win64.
   round trips; Linux runs through Docker (`tools/test_fpc_docker.sh`,
   `tools/test_samples_docker.sh`); CI on every push (`tools/ci-test.sh`).
 
-[Unreleased]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fabianoallex/pascal-jsonmapper-faa/compare/v0.2.1...v0.3.0

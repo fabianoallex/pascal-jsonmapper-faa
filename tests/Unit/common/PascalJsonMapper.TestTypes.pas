@@ -72,6 +72,10 @@ type
   TItemArray = array of IItem;
   TIntArray = array of Integer;
   TStrArray = array of string;
+  TCurrArray = array of Currency;
+  // A Currency of its own type: still read and written as Currency (see
+  // TCurrencyDto.PrecoValue for what FPC 3.2.2 can't compile with it).
+  TMoney = type Currency;
 
 {$M+}
   TItem = class(TInterfacedObject, IItem)
@@ -170,6 +174,50 @@ type
     property Spare: TAddress read FSpare write FSpare;
   end;
 
+  // Currency through every way a property reaches its value: a field, a
+  // static method, a virtual method, an indexed method, a field read with a
+  // method write, and a type of its own.
+  TCurrencyDto = class
+  private
+    FCampo: Currency;
+    FMetodo: Currency;
+    FVirt: Currency;
+    FIdx: array[0..3] of Currency;
+    FMisto: Currency;
+    FPreco: TMoney;
+    function GetMetodo: Currency;
+    procedure SetMetodo(const AValue: Currency);
+    function GetIdx(AIndex: Integer): Currency;
+    procedure SetIdx(AIndex: Integer; const AValue: Currency);
+    procedure SetMisto(const AValue: Currency);
+  protected
+    function GetVirt: Currency; virtual;
+    procedure SetVirt(AValue: Currency); virtual;
+  public
+    procedure SetAll(AValue: Currency);
+    // Preco's value. FPC 3.2.2 stops with "Internal error 200210061" on any
+    // assignment between Currency and a "type Currency", so code here goes
+    // through Move; the mapper doesn't assign between them.
+    function PrecoValue: Currency;
+  published
+    property Campo: Currency read FCampo write FCampo;
+    property Metodo: Currency read GetMetodo write SetMetodo;
+    property Virt: Currency read GetVirt write SetVirt;
+    property Indexado: Currency index 2 read GetIdx write SetIdx;
+    property Misto: Currency read FMisto write SetMisto;
+    property Preco: TMoney read FPreco write FPreco;
+  end;
+
+  // Overrides the virtual accessors: the mapper must reach these.
+  TCurrencyChildDto = class(TCurrencyDto)
+  protected
+    function GetVirt: Currency; override;
+    procedure SetVirt(AValue: Currency); override;
+  public
+    VirtReads: Integer;
+    VirtWrites: Integer;
+  end;
+
   // Names that show what each Naming does, and Kind for the JSON member
   // "type" (a Pascal keyword) through RenameMember.
   TNamingDto = class(TInterfacedObject, INamingDto)
@@ -239,6 +287,18 @@ type
 // bodies with non-ASCII text are identical on both compilers.
 function U(const ACodePoints: array of Cardinal): string;
 
+// Currency from and to its Int64 count of 1/10000, so tests can name the
+// exact value (and the type's limits) without a floating-point literal.
+function CurrOf(AUnits: Int64): Currency;
+function UnitsOf(AValue: Currency): Int64;
+
+// xorshift64: shifts and xors only, so no overflow-check trap under $Q+,
+// and the same sequence on both compilers.
+function NextRandom(var AState: UInt64): UInt64;
+// A Currency's units with the magnitude spread over the whole range (a
+// random bit length, then random bits) and a random sign.
+function RandomCurrencyUnits(var AState: UInt64): Int64;
+
 // A mapper with every test DTO registered.
 function NewTestMapper: TJsonMapper;
 
@@ -280,6 +340,104 @@ begin
   inherited Create;
   FPadrao := 42;
   FSomenteLeitura := 'ro';
+end;
+
+function CurrOf(AUnits: Int64): Currency;
+begin
+  Move(AUnits, Result, SizeOf(Result));
+end;
+
+function UnitsOf(AValue: Currency): Int64;
+begin
+  Move(AValue, Result, SizeOf(Result));
+end;
+
+function NextRandom(var AState: UInt64): UInt64;
+begin
+  AState := AState xor (AState shl 13);
+  AState := AState xor (AState shr 7);
+  AState := AState xor (AState shl 17);
+  Result := AState;
+end;
+
+function RandomCurrencyUnits(var AState: UInt64): Int64;
+var
+  R: UInt64;
+  Bits: Integer;
+begin
+  R := NextRandom(AState);
+  Result := Int64(R shr 1);
+  Bits := 1 + Integer((NextRandom(AState) shr 32) mod 63);
+  if Bits < 63 then
+    Result := Result and ((Int64(1) shl Bits) - 1);
+  if Odd(R) then
+    Result := -Result;
+end;
+
+{ TCurrencyDto }
+
+function TCurrencyDto.GetMetodo: Currency;
+begin
+  Result := FMetodo;
+end;
+
+procedure TCurrencyDto.SetMetodo(const AValue: Currency);
+begin
+  FMetodo := AValue;
+end;
+
+function TCurrencyDto.GetVirt: Currency;
+begin
+  Result := FVirt;
+end;
+
+procedure TCurrencyDto.SetVirt(AValue: Currency);
+begin
+  FVirt := AValue;
+end;
+
+function TCurrencyDto.GetIdx(AIndex: Integer): Currency;
+begin
+  Result := FIdx[AIndex];
+end;
+
+procedure TCurrencyDto.SetIdx(AIndex: Integer; const AValue: Currency);
+begin
+  FIdx[AIndex] := AValue;
+end;
+
+procedure TCurrencyDto.SetMisto(const AValue: Currency);
+begin
+  FMisto := AValue;
+end;
+
+procedure TCurrencyDto.SetAll(AValue: Currency);
+begin
+  Campo := AValue;
+  Metodo := AValue;
+  Virt := AValue;
+  Indexado := AValue;
+  Misto := AValue;
+  Move(AValue, FPreco, SizeOf(FPreco));
+end;
+
+function TCurrencyDto.PrecoValue: Currency;
+begin
+  Move(FPreco, Result, SizeOf(Result));
+end;
+
+{ TCurrencyChildDto }
+
+function TCurrencyChildDto.GetVirt: Currency;
+begin
+  Inc(VirtReads);
+  Result := inherited GetVirt;
+end;
+
+procedure TCurrencyChildDto.SetVirt(AValue: Currency);
+begin
+  Inc(VirtWrites);
+  inherited SetVirt(AValue);
 end;
 
 { TPerson }

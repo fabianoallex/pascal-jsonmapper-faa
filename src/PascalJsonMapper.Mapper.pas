@@ -390,6 +390,102 @@ begin
   end;
 end;
 
+{ Currency properties
+
+  Read and written without TRttiProperty.GetValue/SetValue: FPC 3.2.2 goes
+  through Extended there (GetFloatProp/SetFloatProp), which is a Double on
+  Win64, so large values lost their last digits and the top of the range
+  raised EInvalidOp; on Linux the 80-bit Extended still missed by one unit,
+  rarely. This is the RTL's own dispatch (field, static or virtual method,
+  with or without index), with the method typed as Currency. }
+
+type
+  TCurrencyGetter = function: Currency of object;
+  TCurrencyIndexGetter = function(Index: Integer): Currency of object;
+  TCurrencySetter = procedure(const AValue: Currency) of object;
+{$IFDEF FPC}
+  TCurrencyIndexSetter = procedure(Index: Integer; AValue: Currency) of object;
+{$ELSE}
+  TCurrencyIndexSetter = procedure(Index: Integer; const AValue: Currency) of object;
+{$ENDIF}
+
+function IsCurrencyType(ATypeInfo: PTypeInfo): Boolean;
+begin
+  Result := (ATypeInfo^.Kind = tkFloat) and (GetTypeData(ATypeInfo)^.FloatType = ftCurr);
+end;
+
+// The field's address, or nil when the getter (AWrite False) or setter is a
+// method, which AMethod then holds.
+function ResolveAccessor(AInstance: TObject; AProp: PPropInfo; AWrite: Boolean;
+  out AMethod: TMethod): Pointer;
+var
+  Proc: Pointer;
+begin
+  Result := nil;
+  AMethod.Data := AInstance;
+  if AWrite then
+    Proc := AProp^.SetProc
+  else
+    Proc := AProp^.GetProc;
+{$IFDEF FPC}
+  case (AProp^.PropProcs shr (2 * Ord(AWrite))) and 3 of
+    ptField:
+      Result := PByte(AInstance) + PtrUInt(Proc);
+    ptStatic:
+      AMethod.Code := Proc;
+    ptVirtual:
+      AMethod.Code := PCodePointer(PByte(AInstance.ClassType) + PtrUInt(Proc))^;
+  else
+    raise EJsonMapperError.CreateFmt('%s: no field or method to access it',
+      [PropInfoName(AProp)]);
+  end;
+{$ELSE}
+  if (IntPtr(Proc) and PROPSLOT_MASK) = PROPSLOT_FIELD then
+    Result := PByte(AInstance) + (IntPtr(Proc) and not PROPSLOT_MASK)
+  else if (IntPtr(Proc) and PROPSLOT_MASK) = PROPSLOT_VIRTUAL then
+    AMethod.Code := PPointer(PNativeUInt(AInstance)^ + (UIntPtr(Proc) and $FFFF))^
+  else
+    AMethod.Code := Proc;
+{$ENDIF}
+end;
+
+function HasIndex(AProp: PPropInfo): Boolean;
+begin
+{$IFDEF FPC}
+  Result := ((AProp^.PropProcs shr 6) and 1) <> 0;
+{$ELSE}
+  Result := AProp^.Index <> Low(AProp^.Index);
+{$ENDIF}
+end;
+
+function GetCurrencyProp(AInstance: TObject; AProp: PPropInfo): Currency;
+var
+  Field: Pointer;
+  M: TMethod;
+begin
+  Field := ResolveAccessor(AInstance, AProp, False, M);
+  if Field <> nil then
+    Result := PCurrency(Field)^
+  else if HasIndex(AProp) then
+    Result := TCurrencyIndexGetter(M)(AProp^.Index)
+  else
+    Result := TCurrencyGetter(M)();
+end;
+
+procedure SetCurrencyProp(AInstance: TObject; AProp: PPropInfo; const AValue: Currency);
+var
+  Field: Pointer;
+  M: TMethod;
+begin
+  Field := ResolveAccessor(AInstance, AProp, True, M);
+  if Field <> nil then
+    PCurrency(Field)^ := AValue
+  else if HasIndex(AProp) then
+    TCurrencyIndexSetter(M)(AProp^.Index, AValue)
+  else
+    TCurrencySetter(M)(AValue);
+end;
+
 { Class metadata cache }
 
 type
@@ -397,6 +493,7 @@ type
     Name: string;
     TypeInfo: PTypeInfo;
     Prop: TRttiProperty;
+    PropInfo: PPropInfo;  // the same property, for ReadProperty/WriteProperty
     Readable: Boolean;
     Writable: Boolean;
   end;
@@ -473,6 +570,8 @@ begin
         Continue;
       Result.Props[N].Name := Name;
       Result.Props[N].Prop := Prop;
+      // The most derived declaration, as RType.GetProperty returns.
+      Result.Props[N].PropInfo := GetPropInfo(AClass.ClassInfo, Name);
       Result.Props[N].TypeInfo := Prop.PropertyType.Handle;
       Result.Props[N].Readable := Prop.IsReadable;
       Result.Props[N].Writable := Prop.IsWritable;
@@ -713,6 +812,29 @@ begin
   end;
 end;
 
+{ Property values: TRttiProperty, except for Currency (see GetCurrencyProp). }
+
+function ReadProperty(const AProp: TJsonPropMeta; AObject: TObject): TValue;
+var
+  Cur: Currency;
+begin
+  if IsCurrencyType(AProp.TypeInfo) then
+  begin
+    Cur := GetCurrencyProp(AObject, AProp.PropInfo);
+    TValue.Make(@Cur, AProp.TypeInfo, Result);
+  end
+  else
+    Result := AProp.Prop.GetValue(AObject);
+end;
+
+procedure WriteProperty(const AProp: TJsonPropMeta; AObject: TObject; const AValue: TValue);
+begin
+  if IsCurrencyType(AProp.TypeInfo) then
+    SetCurrencyProp(AObject, AProp.PropInfo, PCurrency(AValue.GetReferenceToRawData)^)
+  else
+    AProp.Prop.SetValue(AObject, AValue);
+end;
+
 { Reading }
 
 function TJsonMapper.CreateFromJson(ATypeInfo: PTypeInfo; AJson: TJsonValue;
@@ -819,7 +941,7 @@ begin
     if not Meta.Props[I].Writable then
       Continue;
     if ReadValue(Member, Meta.Props[I].TypeInfo, Path, Value) then
-      Meta.Props[I].Prop.SetValue(AObject, Value);
+      WriteProperty(Meta.Props[I], AObject, Value);
   end;
 end;
 
@@ -976,15 +1098,11 @@ begin
             end;
           ftCurr:
             begin
-              if not TryStrToCurr(AJson.NumberText, Cur, JsonFormatSettings) then
-              begin
-                // Assigning a Double beyond Currency's range raises
-                // EInvalidOp, without a path.
-                Dbl := JsonStrToDouble(AJson.NumberText);
-                if (Dbl >= 922337203685477.5807) or (Dbl <= -922337203685477.5808) then
-                  raise EJsonInputError.CreateInput(APath,
-                    Format('Number %s is out of range', [AJson.NumberText]), 'type Currency');
-                Cur := Dbl;
+              try
+                Cur := JsonStrToCurrency(AJson.NumberText);
+              except
+                on E: EJsonError do
+                  raise EJsonInputError.CreateInput(APath, E.Message, 'type Currency');
               end;
               TValue.Make(@Cur, ATypeInfo, AValue);
             end;
@@ -1108,7 +1226,7 @@ begin
     Name := Names.Names[I];
     AWriter.Name(Name);
     // An omitted value leaves the pending name unwritten.
-    WriteValue(AWriter, Meta.Props[I].Prop.GetValue(AObject),
+    WriteValue(AWriter, ReadProperty(Meta.Props[I], AObject),
       Meta.Props[I].TypeInfo, MemberPath(APath, Name));
   end;
   AWriter.EndObject;
