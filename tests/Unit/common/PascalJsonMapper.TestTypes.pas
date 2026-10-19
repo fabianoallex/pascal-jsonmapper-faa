@@ -69,6 +69,10 @@ type
     ['{94C6C477-32BD-4CB8-B7EA-574187B73664}']
   end;
 
+  IUtcDto = interface
+    ['{0508B28A-F591-4D0B-B429-AB70C684F501}']
+  end;
+
   TItemArray = array of IItem;
   TIntArray = array of Integer;
   TStrArray = array of string;
@@ -258,6 +262,16 @@ type
     property Nome: string read FNome write FNome;
     property Apelido: IOptText read FApelido write FApelido;
   end;
+
+  // An instant next to a plain TDateTime (0.7.0).
+  TUtcDto = class(TInterfacedObject, IUtcDto)
+  private
+    FAt: TUtcDateTime;
+    FLocal: TDateTime;
+  published
+    property At: TUtcDateTime read FAt write FAt;
+    property Local: TDateTime read FLocal write FLocal;
+  end;
 {$M-}
 
   TOptText = class(TInterfacedObject, IOptionalBase, IOptText)
@@ -323,6 +337,7 @@ begin
   Result.RegisterMapping<IPatchDto, TPatchDto>;
   Result.RegisterMapping<INamingDto, TNamingDto>;
   Result.RegisterMapping<ICollisionDto, TCollisionDto>;
+  Result.RegisterMapping<IUtcDto, TUtcDto>;
   Result.RegisterConverter(TOptTextConverter.Create);
 end;
 

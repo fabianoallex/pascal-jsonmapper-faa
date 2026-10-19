@@ -17,6 +17,8 @@
     already holds; writing serializes it.
   - Anything else (optionals, value objects, custom formats) goes through a
     registered IJsonConverter, consulted before the built-in rules.
+  - TDateTime/TDate/TTime are ISO 8601 without a zone; TUtcDateTime (0.7.0)
+    is an instant: a zone required on input, "Z" written on output.
 
   JSON names: written in camelCase by default (Naming: also as declared or
   snake_case; RenameMember for single members, e.g. a property Kind for the
@@ -1059,13 +1061,15 @@ begin
 
     tkFloat:
       if (ATypeInfo = TypeInfo(TDateTime)) or (ATypeInfo = TypeInfo(TDate)) or
-        (ATypeInfo = TypeInfo(TTime)) then
+        (ATypeInfo = TypeInfo(TTime)) or (ATypeInfo = TypeInfo(TUtcDateTime)) then
       begin
         if AJson.Kind <> jkString then
           Mismatch(APath, 'ISO 8601 string', AJson);
         try
           if ATypeInfo = TypeInfo(TTime) then
             Dt := JsonStrToTime(AJson.AsString)
+          else if ATypeInfo = TypeInfo(TUtcDateTime) then
+            Dt := JsonStrToUtcDateTime(AJson.AsString)
           else
             Dt := JsonStrToDateTime(AJson.AsString);
         except
@@ -1322,6 +1326,8 @@ begin
     tkFloat:
       if ATypeInfo = TypeInfo(TDateTime) then
         AWriter.WriteString(JsonDateTimeToStr(PDateTime(Data)^))
+      else if ATypeInfo = TypeInfo(TUtcDateTime) then
+        AWriter.WriteString(JsonUtcDateTimeToStr(PDateTime(Data)^))
       else if ATypeInfo = TypeInfo(TDate) then
         AWriter.WriteString(JsonDateToStr(PDateTime(Data)^))
       else if ATypeInfo = TypeInfo(TTime) then

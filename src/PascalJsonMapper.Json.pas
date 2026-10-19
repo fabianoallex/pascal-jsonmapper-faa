@@ -169,6 +169,24 @@ function JsonTimeToStr(AValue: TDateTime): string;
 function JsonStrToDateTime(const AText: string): TDateTime;
 function JsonStrToTime(const AText: string): TDateTime;
 
+// An instant in UTC (0.7.0). TDateTime carries no zone, so a TDateTime
+// member reads "2026-12-24T13:00" as is and writes no zone back: a client
+// can't tell a UTC value from a local one. A member declared TUtcDateTime
+// is read and written by these two, which the mapper calls for it:
+// - JsonStrToUtcDateTime requires a date, a time and a zone ('Z' or an
+//   offset; the offset converts to UTC) and raises EJsonError otherwise;
+// - JsonUtcDateTimeToStr writes 'YYYY-MM-DDTHH:MM:SS[.fff]Z', from the value
+//   rounded to the millisecond with integer arithmetic, so 13:00:00 never
+//   comes out as 12:59:59.999 (a fraction of a day is rarely exact in a
+//   Double).
+// TUtcDateTime is a distinct type ("type TDateTime"), so it has its own
+// RTTI and still takes TDateTime arithmetic and DateUtils.
+type
+  TUtcDateTime = type TDateTime;
+
+function JsonUtcDateTimeToStr(AValue: TDateTime): string;
+function JsonStrToUtcDateTime(const AText: string): TDateTime;
+
 function JsonFormatSettings: TFormatSettings;
 
 // One Unicode code point in the native string encoding: UTF-16 on Delphi,
@@ -1617,9 +1635,10 @@ begin
   end;
 end;
 
-// Reads hh:mm[:ss[.fff...]] [Z|+hh:mm|-hh:mm]; returns the time part and the
-// offset in minutes (0 when absent).
-procedure ReadTime(var R: TIsoReader; out ATime: TDateTime; out AOffsetMin: Integer);
+// Reads hh:mm[:ss[.fff...]] [Z|+hh:mm|-hh:mm]; returns the time part, the
+// offset in minutes (0 when absent) and whether a zone was there.
+procedure ReadTime(var R: TIsoReader; out ATime: TDateTime; out AOffsetMin: Integer;
+  out AHasZone: Boolean);
 var
   H, N, S, MS, Scale: Integer;
   Sign: Integer;
@@ -1651,6 +1670,7 @@ begin
     R.Fail;
   ATime := EncodeTime(H, N, S, MS);
   AOffsetMin := 0;
+  AHasZone := CharInSet(R.Peek, ['Z', 'z', '+', '-']);
   case R.Peek of
     'Z', 'z':
       Inc(R.Pos);
@@ -1670,11 +1690,14 @@ begin
   end;
 end;
 
-function JsonStrToDateTime(const AText: string): TDateTime;
+// Date, then an optional time; ARequireZone: the time and its zone must be
+// there (TUtcDateTime).
+function ReadDateTime(const AText: string; ARequireZone: Boolean): TDateTime;
 var
   R: TIsoReader;
   Y, M, D, OffsetMin: Integer;
   T: TDateTime;
+  HasZone: Boolean;
 begin
   R.Text := Trim(AText);
   R.Pos := 1;
@@ -1688,23 +1711,59 @@ begin
   if (R.Peek = 'T') or (R.Peek = 't') or (R.Peek = ' ') then
   begin
     Inc(R.Pos);
-    ReadTime(R, T, OffsetMin);
+    ReadTime(R, T, OffsetMin, HasZone);
     Result := Result + T;
     if OffsetMin <> 0 then
       Result := IncMinute(Result, -OffsetMin);
-  end;
+  end
+  else
+    HasZone := False;
   if not R.AtEnd then
     R.Fail;
+  if ARequireZone and not HasZone then
+    raise EJsonError.CreateFmt('Invalid UTC date/time (a time with "Z" or an offset is ' +
+      'required): "%s"', [R.Text]);
+end;
+
+function JsonStrToDateTime(const AText: string): TDateTime;
+begin
+  Result := ReadDateTime(AText, False);
+end;
+
+function JsonStrToUtcDateTime(const AText: string): TDateTime;
+begin
+  Result := ReadDateTime(AText, True);
+end;
+
+function JsonUtcDateTimeToStr(AValue: TDateTime): string;
+const
+  MS_PER_DAY = Int64(86400000);
+var
+  LMs, LDays, LRem: Int64;
+begin
+  // Before 1899-12-30 a TDateTime's fraction counts the other way: leave
+  // those to the RTL's decoding.
+  if AValue < 0 then
+    Exit(JsonDateTimeToStr(AValue) + 'Z');
+  LMs := Round(AValue * MS_PER_DAY);
+  LDays := LMs div MS_PER_DAY;
+  LRem := LMs mod MS_PER_DAY;
+  Result := JsonDateToStr(LDays) + Format('T%.2d:%.2d:%.2d',
+    [LRem div 3600000, LRem div 60000 mod 60, LRem div 1000 mod 60]);
+  if LRem mod 1000 <> 0 then
+    Result := Result + Format('.%.3d', [LRem mod 1000]);
+  Result := Result + 'Z';
 end;
 
 function JsonStrToTime(const AText: string): TDateTime;
 var
   R: TIsoReader;
   OffsetMin: Integer;
+  HasZone: Boolean;
 begin
   R.Text := Trim(AText);
   R.Pos := 1;
-  ReadTime(R, Result, OffsetMin);
+  ReadTime(R, Result, OffsetMin, HasZone);
   if not R.AtEnd then
     R.Fail;
 end;

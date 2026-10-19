@@ -6,6 +6,21 @@ may change the API; each such change is listed here.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-19
+
+### Added
+
+- `TUtcDateTime` (`PascalJsonMapper.Json`), a distinct `type TDateTime` for instants. A member
+  of that type is read only from an ISO 8601 date and time with its zone (`Z` or an offset,
+  converted to UTC); a text without one, or a date alone, is an `EJsonInputError` with its
+  path. It is written as `YYYY-MM-DDTHH:MM:SS[.fff]Z`, from the value rounded to the
+  millisecond with integer arithmetic (every second of a day comes back as itself, checked).
+  A `TDateTime` member reads a text without a zone as is and writes no zone, so a client
+  couldn't tell a UTC value from a local one: pascal-agenda-faa carried its instants as strings
+  for that reason. `TDateTime`, `TDate` and `TTime` don't change.
+- `JsonStrToUtcDateTime` and `JsonUtcDateTimeToStr`, the same rules for code that reads an
+  instant outside a DTO (a query string).
+
 ## [0.6.0] - 2026-10-16
 
 ### Fixed

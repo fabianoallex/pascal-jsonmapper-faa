@@ -126,6 +126,14 @@ type
     procedure Parse_WithOffset_ConvertsToUtc;
     [Test]
     procedure Parse_Invalid_Raises;
+    [Test]
+    procedure Utc_Writes_Z;
+    [Test]
+    procedure Utc_Writes_ExactSeconds;
+    [Test]
+    procedure Utc_Parses_ZAndOffset;
+    [Test]
+    procedure Utc_RequiresAZone;
   end;
 
 implementation
@@ -825,6 +833,64 @@ begin
     on E: EJsonError do
       ;
   end;
+end;
+
+procedure TJsonDateTests.Utc_Writes_Z;
+begin
+  TAssert.AssertEquals('2026-12-24T13:00:00Z',
+    JsonUtcDateTimeToStr(EncodeDateTime(2026, 12, 24, 13, 0, 0, 0)));
+  TAssert.AssertEquals('2026-12-24T13:00:00.250Z',
+    JsonUtcDateTimeToStr(EncodeDateTime(2026, 12, 24, 13, 0, 0, 250)));
+  TAssert.AssertEquals('1899-12-30T00:00:00Z', JsonUtcDateTimeToStr(0));
+end;
+
+procedure TJsonDateTests.Utc_Writes_ExactSeconds;
+var
+  I: Integer;
+  LExpected: TDateTime;
+begin
+  // A fraction of a day is rarely exact in a Double: every second of a day,
+  // built from Unix-style seconds as an application stores them, comes back
+  // as the same second, never as .999 of the one before.
+  for I := 0 to 86399 do
+  begin
+    LExpected := EncodeDate(2037, 12, 31) + I / 86400;
+    TAssert.AssertEquals(Format('2037-12-31T%.2d:%.2d:%.2dZ',
+      [I div 3600, I div 60 mod 60, I mod 60]), JsonUtcDateTimeToStr(LExpected));
+  end;
+end;
+
+procedure TJsonDateTests.Utc_Parses_ZAndOffset;
+begin
+  TAssert.AssertEquals(EncodeDateTime(2026, 12, 24, 13, 0, 0, 0),
+    JsonStrToUtcDateTime('2026-12-24T13:00:00Z'), 1 / MSecsPerDay / 2);
+  TAssert.AssertEquals(EncodeDateTime(2026, 12, 24, 13, 0, 0, 0),
+    JsonStrToUtcDateTime('2026-12-24T10:00-03:00'), 1 / MSecsPerDay / 2);
+  TAssert.AssertEquals(EncodeDateTime(2026, 12, 24, 13, 0, 0, 0),
+    JsonStrToUtcDateTime('2026-12-24T18:30:00+05:30'), 1 / MSecsPerDay / 2);
+end;
+
+procedure TJsonDateTests.Utc_RequiresAZone;
+
+  procedure Refused(const AText: string);
+  begin
+    try
+      JsonStrToUtcDateTime(AText);
+      TAssert.Fail('Must raise: ' + AText);
+    except
+      on E: EJsonError do
+        ;
+    end;
+  end;
+
+begin
+  Refused('2026-12-24T13:00:00');
+  Refused('2026-12-24');
+  Refused('2026-02-30T13:00:00Z');
+  Refused('13:00:00Z');
+  // The plain reader still takes a text without a zone.
+  TAssert.AssertEquals(EncodeDateTime(2026, 12, 24, 13, 0, 0, 0),
+    JsonStrToDateTime('2026-12-24T13:00:00'), 1 / MSecsPerDay / 2);
 end;
 
 initialization

@@ -79,6 +79,21 @@ type
     procedure Error_NaN_HasPath;
   end;
 
+  // TUtcDateTime members (0.7.0): a zone required on input, "Z" on output,
+  // a plain TDateTime next to it unchanged.
+  TMapperUtcTests = class(TTestCase)
+  private
+    FMapper: TJsonMapper;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure Write_UtcHasZ_LocalHasNone;
+    procedure Read_OffsetConvertsToUtc;
+    procedure Read_WithoutZone_IsInputErrorWithPath;
+    procedure Read_Number_IsInputError;
+  end;
+
   TMapperTopLevelTests = class(TTestCase)
   private
     FMapper: TJsonMapper;
@@ -1071,9 +1086,75 @@ begin
   TAssert.AssertTrue(TJsonMapper.Shared <> nil);
 end;
 
+{ TMapperUtcTests }
+
+procedure TMapperUtcTests.SetUp;
+begin
+  FMapper := NewTestMapper;
+end;
+
+procedure TMapperUtcTests.TearDown;
+begin
+  FMapper.Free;
+end;
+
+procedure TMapperUtcTests.Write_UtcHasZ_LocalHasNone;
+var
+  Dto: IUtcDto;
+  D: TUtcDto;
+begin
+  D := TUtcDto.Create;
+  Dto := D;
+  D.At := EncodeDateTime(2026, 12, 24, 13, 0, 0, 0);
+  D.Local := EncodeDateTime(2026, 12, 24, 10, 0, 0, 0);
+  TAssert.AssertEquals('{"at":"2026-12-24T13:00:00Z","local":"2026-12-24T10:00:00"}',
+    FMapper.ToJson<IUtcDto>(Dto));
+end;
+
+procedure TMapperUtcTests.Read_OffsetConvertsToUtc;
+var
+  Dto: IUtcDto;
+begin
+  Dto := FMapper.FromJson<IUtcDto>('{"at":"2026-12-24T10:00:00-03:00"}');
+  TAssert.AssertEquals(EncodeDateTime(2026, 12, 24, 13, 0, 0, 0),
+    (Dto as TUtcDto).At, 1 / MSecsPerDay / 2);
+end;
+
+procedure TMapperUtcTests.Read_WithoutZone_IsInputErrorWithPath;
+var
+  Dto: IUtcDto;
+begin
+  try
+    Dto := FMapper.FromJson<IUtcDto>('{"at":"2026-12-24T13:00:00"}');
+    TAssert.Fail('A UTC member without a zone must raise');
+  except
+    on E: EJsonInputError do
+      TAssert.AssertEquals('$.at: Invalid UTC date/time (a time with "Z" or an offset is ' +
+        'required): "2026-12-24T13:00:00"', E.Message);
+  end;
+  // The plain TDateTime member still takes it.
+  Dto := FMapper.FromJson<IUtcDto>('{"local":"2026-12-24T13:00:00"}');
+  TAssert.AssertEquals(EncodeDateTime(2026, 12, 24, 13, 0, 0, 0),
+    (Dto as TUtcDto).Local, 1 / MSecsPerDay / 2);
+end;
+
+procedure TMapperUtcTests.Read_Number_IsInputError;
+var
+  Dto: IUtcDto;
+begin
+  try
+    Dto := FMapper.FromJson<IUtcDto>('{"at":46000}');
+    TAssert.Fail('A number must raise');
+  except
+    on E: EJsonInputError do
+      TAssert.AssertEquals('$.at: expected ISO 8601 string, found JSON number', E.Message);
+  end;
+end;
+
 initialization
   RegisterTest(TMapperReadTests);
   RegisterTest(TMapperWriteTests);
+  RegisterTest(TMapperUtcTests);
   RegisterTest(TMapperTopLevelTests);
   RegisterTest(TMapperConverterTests);
   RegisterTest(TMapperCurrencyTests);
